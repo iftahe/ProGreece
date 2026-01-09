@@ -4,8 +4,8 @@ __pycache__/
 *.pyc
 
 # Database (אנחנו לא רוצים להעלות את הדאטה עצמו, רק את הקוד)
-*.db
-*.sqlite3
+#*.db
+#*.sqlite3
 
 # Frontend stuff
 frontend/node_modules/
