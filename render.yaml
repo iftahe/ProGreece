@@ -1,24 +1,21 @@
 services:
-  # Backend Service (Python/FastAPI)
   - type: web
     name: greece-project-api
     env: python
+    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn -k uvicorn.workers.UvicornWorker main:app
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.0
-      - key: DATABASE_URL
-        sync: false 
+        value: "3.11.0"
       - key: ALLOWED_ORIGINS
-        value: "*" # Allow the frontend to talk to the backend
+        value: "*"
 
 staticSites:
-  # Frontend Service (React/Vite) - Moved to its own section
   - name: greece-project-web
-    root: frontend # The folder where package.json lives
+    root: frontend
     buildCommand: npm install && npm run build
-    publishPath: ./dist # The folder where Vite builds the files
+    publishPath: dist
     envVars:
       - key: VITE_API_URL
         fromService:
