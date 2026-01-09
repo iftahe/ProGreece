@@ -1,5 +1,5 @@
 services:
-  # Backend Service
+  # Backend Service (Python/FastAPI)
   - type: web
     name: greece-project-api
     env: python
@@ -9,15 +9,16 @@ services:
       - key: PYTHON_VERSION
         value: 3.11.0
       - key: DATABASE_URL
-        sync: false # User will need to set this if they add a Postgres DB later, or it will fallback to SQLite (ephemeral)
+        sync: false 
+      - key: ALLOWED_ORIGINS
+        value: "*" # Allow the frontend to talk to the backend
 
-  # Frontend Service
-  - type: static
-    name: greece-project-web
-    env: static
-    root: frontend # Sets the build context to the frontend directory
+staticSites:
+  # Frontend Service (React/Vite) - Moved to its own section
+  - name: greece-project-web
+    root: frontend # The folder where package.json lives
     buildCommand: npm install && npm run build
-    staticPublishPath: ./dist # Path relative to the root (frontend)
+    publishPath: ./dist # The folder where Vite builds the files
     envVars:
       - key: VITE_API_URL
         fromService:
