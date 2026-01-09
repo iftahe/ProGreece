@@ -2,7 +2,7 @@ import axios from 'axios';
 
 // יצירת מופע של axios עם כתובת הבסיס
 const api = axios.create({
-    baseURL: 'http://localhost:8000',
+    baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000',
 });
 
 export const getProjects = async () => {
@@ -29,6 +29,16 @@ export const getCashFlowForecast = async (projectId) => {
 // שינינו לשימוש ב-api.get במקום fetch כדי לשמור על אחידות וכדי שזה יעבוד עם ה-baseURL
 export const getTransactions = async () => {
     const response = await api.get('/transactions/');
+    return response.data;
+};
+
+export const deleteTransaction = async (id) => {
+    const response = await api.delete(`/transactions/${id}`);
+    return response.data;
+};
+
+export const updateTransaction = async (id, data) => {
+    const response = await api.put(`/transactions/${id}`, data);
     return response.data;
 };
 

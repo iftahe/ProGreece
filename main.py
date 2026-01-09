@@ -11,11 +11,22 @@ import schemas
 # Create tables if they don't exist (useful for dev)
 models.Base.metadata.create_all(bind=engine)
 
+import os
+
 app = FastAPI(title="Greece Project API")
+
+# Define allowed origins
+# In production, set ALLOWED_ORIGINS to a comma-separated list of URLs (e.g., "https://my-app.onrender.com")
+# Default to ["*"] for development or if not set
+origins_env = os.getenv("ALLOWED_ORIGINS")
+if origins_env:
+    origins = origins_env.split(",")
+else:
+    origins = ["*"]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # שינינו את זה לכוכבית - פותח גישה לכולם (כולל 5174)
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -148,6 +159,37 @@ def read_transaction(transaction_id: int, db: Session = Depends(get_db)):
     if transaction is None:
         raise HTTPException(status_code=404, detail="Transaction not found")
     return transaction
+
+@app.put("/transactions/{transaction_id}", response_model=schemas.Transaction)
+def update_transaction(transaction_id: int, transaction: schemas.TransactionCreate, db: Session = Depends(get_db)):
+    db_transaction = db.query(models.Transaction).filter(models.Transaction.id == transaction_id).first()
+    if db_transaction is None:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    # 1. Update fields from schema
+    update_data = transaction.model_dump(exclude_unset=True)
+    
+    # 2. Re-apply VAT Logic (optional/recommended if amounts/accounts changed)
+    # We pass the schema object 'transaction' to our logic helper
+    final_vat_rate = apply_vat_logic(db, transaction)
+    update_data['vat_rate'] = final_vat_rate
+
+    for key, value in update_data.items():
+        setattr(db_transaction, key, value)
+
+    db.commit()
+    db.refresh(db_transaction)
+    return db_transaction
+
+@app.delete("/transactions/{transaction_id}")
+def delete_transaction(transaction_id: int, db: Session = Depends(get_db)):
+    db_transaction = db.query(models.Transaction).filter(models.Transaction.id == transaction_id).first()
+    if db_transaction is None:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    
+    db.delete(db_transaction)
+    db.commit()
+    return {"ok": True}
 
 # --------------------------
 # Reports

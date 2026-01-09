@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
 // הוספנו את getTransactions לייבוא
-import { getProjects, getAccounts, createTransaction, getTransactions } from "../api";
+import { getProjects, getAccounts, createTransaction, getTransactions, deleteTransaction, updateTransaction } from "../api";
 // שים לב: בדוק שהנתיב ל-api נכון (אצלך זה אולי '../api' או '../services/api')
 
 const Transactions = () => {
     const [projects, setProjects] = useState([]);
     const [accounts, setAccounts] = useState([]);
     const [transactions, setTransactions] = useState([]); // כאן נשמור את הרשימה
+    const [editingId, setEditingId] = useState(null); // Track which ID we are editing
 
-    const [formData, setFormData] = useState({
+    const initialFormState = {
         date: new Date().toISOString().split('T')[0],
         amount: '',
         description: '',
@@ -17,7 +18,9 @@ const Transactions = () => {
         to_account_id: '',
         vat_rate: '0',
         status: 'Executed'
-    });
+    };
+
+    const [formData, setFormData] = useState(initialFormState);
 
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState(null);
@@ -39,7 +42,9 @@ const Transactions = () => {
             setAccounts(accs);
             setTransactions(txs); // שמירת התנועות בסטייט
 
-            if (projs.length > 0) setFormData(prev => ({ ...prev, project_id: projs[0].id }));
+            if (projs.length > 0 && !editingId) {
+                setFormData(prev => ({ ...prev, project_id: projs[0].id }));
+            }
         } catch (error) {
             console.error("Failed to load data", error);
         }
@@ -56,34 +61,74 @@ const Transactions = () => {
         setMessage(null);
 
         try {
+            // Note: Backend expects 'remarks' not 'description', and 'transaction_type' not 'status'
             const payload = {
-                ...formData,
+                date: formData.date,
                 amount: parseFloat(formData.amount),
-                vat_rate: parseFloat(formData.vat_rate) || 0,
+                vat_rate: parseFloat(formData.vat_rate),
                 project_id: formData.project_id ? parseInt(formData.project_id) : null,
                 from_account_id: formData.from_account_id ? parseInt(formData.from_account_id) : null,
                 to_account_id: formData.to_account_id ? parseInt(formData.to_account_id) : null,
+                remarks: formData.description,
+                transaction_type: formData.status === 'Executed' ? 1 : 2 // 1=Executed, 2=Planned
             };
 
-            await createTransaction(payload);
-            setMessage({ type: 'success', text: 'Transaction created successfully!' });
+            if (editingId) {
+                // UPDATE MODE
+                await updateTransaction(editingId, payload);
+                setMessage({ type: 'success', text: 'Transaction updated successfully!' });
+            } else {
+                // CREATE MODE
+                await createTransaction(payload);
+                setMessage({ type: 'success', text: 'Transaction created successfully!' });
+            }
 
-            // איפוס הטופס
-            setFormData(prev => ({
-                ...prev,
-                amount: '',
-                description: ''
-            }));
-
-            // רענון הטבלה כדי לראות את השורה החדשה
-            const updatedTxs = await getTransactions();
-            setTransactions(updatedTxs);
+            resetForm();
+            loadData(); // Refresh list
 
         } catch (error) {
             console.error(error);
-            setMessage({ type: 'error', text: 'Failed to create transaction.' });
+            setMessage({ type: 'error', text: 'Failed to save transaction.' });
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleDelete = async (id) => {
+        if (window.confirm("Are you sure you want to delete this transaction? This cannot be undone.")) {
+            try {
+                await deleteTransaction(id);
+                loadData(); // Refresh list
+                setMessage({ type: 'success', text: 'Transaction deleted.' });
+            } catch (error) {
+                console.error(error);
+                setMessage({ type: 'error', text: 'Failed to delete transaction.' });
+            }
+        }
+    };
+
+    const handleEdit = (transaction) => {
+        setEditingId(transaction.id);
+        setFormData({
+            date: transaction.date ? transaction.date.split('T')[0] : '',
+            amount: transaction.amount,
+            description: transaction.remarks || '', // Map remarks to description
+            project_id: transaction.project_id || '',
+            from_account_id: transaction.from_account_id || '',
+            to_account_id: transaction.to_account_id || '',
+            vat_rate: transaction.vat_rate || 0,
+            status: transaction.transaction_type === 1 ? 'Executed' : 'Planned' // Heuristic mapping, logic might differ
+        });
+        // Scroll to top
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    const resetForm = () => {
+        setEditingId(null);
+        setFormData(initialFormState);
+        // Reset project default if available
+        if (projects.length > 0) {
+            setFormData(prev => ({ ...prev, project_id: projects[0].id }));
         }
     };
 
@@ -104,7 +149,16 @@ const Transactions = () => {
 
             {/* --- FORM SECTION --- */}
             <div>
-                <h2 className="text-2xl font-bold mb-6 text-gray-900">New Transaction</h2>
+                <div className="flex justify-between items-center mb-6">
+                    <h2 className="text-2xl font-bold text-gray-900">
+                        {editingId ? 'Edit Transaction' : 'New Transaction'}
+                    </h2>
+                    {editingId && (
+                        <button onClick={resetForm} className="text-sm text-red-600 hover:text-red-800 underline">
+                            Cancel Edit
+                        </button>
+                    )}
+                </div>
 
                 {message && (
                     <div className={`p-4 mb-4 rounded ${message.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
@@ -155,9 +209,14 @@ const Transactions = () => {
                             </select>
                         </div>
                     </div>
-                    <div className="flex justify-end">
-                        <button type="submit" disabled={loading} className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700">
-                            {loading ? 'Saving...' : 'Save Transaction'}
+                    <div className="flex justify-end gap-3">
+                        {editingId && (
+                            <button type="button" onClick={resetForm} className="py-2 px-4 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                                Cancel
+                            </button>
+                        )}
+                        <button type="submit" disabled={loading} className={`inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white ${editingId ? 'bg-orange-600 hover:bg-orange-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                            {loading ? 'Saving...' : (editingId ? 'Update Transaction' : 'Save Transaction')}
                         </button>
                     </div>
                 </form>
@@ -177,12 +236,13 @@ const Transactions = () => {
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">To</th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                             </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-200">
                             {transactions.length === 0 ? (
                                 <tr>
-                                    <td colSpan="7" className="px-6 py-4 text-center text-gray-500">No transactions found.</td>
+                                    <td colSpan="8" className="px-6 py-4 text-center text-gray-500">No transactions found.</td>
                                 </tr>
                             ) : (
                                 transactions.map((t) => (
@@ -194,7 +254,7 @@ const Transactions = () => {
                                             {getProjectName(t.project_id)}
                                         </td>
                                         <td className="px-6 py-4 text-sm text-gray-500">
-                                            {t.description || '-'}
+                                            {t.remarks || '-'}
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                             {getAccountName(t.from_account_id)}
@@ -206,10 +266,19 @@ const Transactions = () => {
                                             {Number(t.amount).toLocaleString()} ₪
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap">
-                                            <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${t.status === 'Executed' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
+                                            <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${t.status === 'Executed' || t.transaction_type === 1 ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
                                                 }`}>
-                                                {t.status}
+                                                {/* Use transaction_type=1 (general/income) as executed for now if status missing */}
+                                                {t.transaction_type === 1 ? 'Executed' : 'Planned'}
                                             </span>
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                            <button onClick={() => handleEdit(t)} className="text-indigo-600 hover:text-indigo-900 mr-4">
+                                                Edit
+                                            </button>
+                                            <button onClick={() => handleDelete(t.id)} className="text-red-600 hover:text-red-900">
+                                                Delete
+                                            </button>
                                         </td>
                                     </tr>
                                 ))
