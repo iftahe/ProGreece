@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, date
 from decimal import Decimal
 
 # --------------------------
@@ -31,11 +31,31 @@ class ProjectBase(BaseModel):
     status: Optional[str] = None
     remarks: Optional[str] = None
     account_balance: Optional[Decimal] = None
+    total_budget: Optional[Decimal] = None
 
 class ProjectCreate(ProjectBase):
     pass
 
 class Project(ProjectBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+# --------------------------
+# Budget Category Schemas
+# --------------------------
+class BudgetCategoryBase(BaseModel):
+    name: str
+    project_id: Optional[int] = None
+    parent_id: Optional[int] = None
+    amount: Optional[Decimal] = 0
+    date: Optional[date] = None
+
+class BudgetCategoryCreate(BudgetCategoryBase):
+    pass
+
+class BudgetCategory(BudgetCategoryBase):
     id: int
 
     class Config:
@@ -57,6 +77,7 @@ class TransactionBase(BaseModel):
     transaction_type: Optional[int] = None
     cust_invoice: Optional[str] = None
     cust_id: Optional[int] = None
+    budget_item_id: Optional[int] = None
 
 class TransactionCreate(TransactionBase):
     pass

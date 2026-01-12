@@ -63,6 +63,24 @@ def read_project(project_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Project not found")
     return project
 
+@app.put("/projects/{project_id}", response_model=schemas.Project)
+def update_project(project_id: int, project: schemas.ProjectCreate, db: Session = Depends(get_db)):
+    db_project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if db_project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    update_data = project.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(db_project, key, value)
+    
+    db.commit()
+    db.refresh(db_project)
+    return db_project
+
+@app.get("/projects/{project_id}/budget-items", response_model=List[schemas.BudgetCategory])
+def read_project_budget_items(project_id: int, db: Session = Depends(get_db)):
+    return db.query(models.BudgetCategory).filter(models.BudgetCategory.project_id == project_id).all()
+
 # --------------------------
 # Accounts CRUD
 # --------------------------

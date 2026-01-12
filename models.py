@@ -60,11 +60,28 @@ class Project(Base):
     status = Column(String(255), nullable=True) # Original: Statuse
     remarks = Column(Text, nullable=True) # Original: Remarks
     account_balance = Column(Numeric(18, 2), nullable=True) # Original: AccountBalance
+    total_budget = Column(Numeric(18, 2), nullable=True)
 
     # Relationships
     transactions = relationship("Transaction", back_populates="project")
     apartment_prices = relationship("ApartmentPrice", back_populates="project")
     payment_phases = relationship("ProjectPaymentPhase", back_populates="project")
+    budget_categories = relationship("BudgetCategory", back_populates="project")
+
+class BudgetCategory(Base):
+    __tablename__ = 'budget_categories'
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey('projects.id'))
+    name = Column(String(255))
+    parent_id = Column(Integer, ForeignKey('budget_categories.id'), nullable=True)
+    amount = Column(Numeric(18, 2), default=0)
+    date = Column(Date, nullable=True)
+
+    project = relationship("Project", back_populates="budget_categories")
+    parent = relationship("BudgetCategory", remote_side=[id], back_populates="children")
+    children = relationship("BudgetCategory", back_populates="parent")
+    transactions = relationship("Transaction", back_populates="budget_item")
 
 
 # --------------------------
@@ -88,11 +105,13 @@ class Transaction(Base):
     transaction_type = Column(Integer, nullable=True) # Original: TransType
     cust_invoice = Column(String(255), nullable=True) # Original: CustInvoice
     cust_id = Column(Integer, nullable=True) # Original: CustID
+    budget_item_id = Column(Integer, ForeignKey('budget_categories.id'), nullable=True)
 
     # Relationships
     project = relationship("Project", back_populates="transactions")
     from_account = relationship("Account", foreign_keys=[from_account_id], back_populates="transactions_from")
     to_account = relationship("Account", foreign_keys=[to_account_id], back_populates="transactions_to")
+    budget_item = relationship("BudgetCategory", back_populates="transactions")
 
 
 # --------------------------
