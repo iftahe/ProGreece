@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: greece-project-api
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn -k uvicorn.workers.UvicornWorker main:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: ALLOWED_ORIGINS
+        value: "*"
+
+staticSites:
+  - name: greece-project-web
+    root: frontend
+    buildCommand: npm install && npm run build
+    publishPath: dist
+    envVars:
+      - key: VITE_API_URL
+        fromService:
+          type: web
+          name: greece-project-api
+          property: url

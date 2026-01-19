@@ -1,0 +1,16 @@
+# Python stuff
+__pycache__/
+.venv/
+*.pyc
+
+# Database (אנחנו לא רוצים להעלות את הדאטה עצמו, רק את הקוד)
+#*.db
+#*.sqlite3
+
+# Frontend stuff
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+
+# System files
+.DS_Store
