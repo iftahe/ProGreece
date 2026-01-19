@@ -120,8 +120,13 @@ def generate_cash_flow_forecast(db: Session, project_id: Optional[int] = None) -
         to_acc = account_map.get(tx.to_account_id)
         from_acc = account_map.get(tx.from_account_id)
         
-        to_type = to_acc.account_type.name if to_acc and to_acc.account_type else ""
-        from_type = from_acc.account_type.name if from_acc and from_acc.account_type else ""
+        to_type = ""
+        if to_acc and to_acc.account_type:
+            to_type = to_acc.account_type.name if hasattr(to_acc.account_type, 'name') else str(to_acc.account_type)
+        
+        from_type = ""
+        if from_acc and from_acc.account_type:
+            from_type = from_acc.account_type.name if hasattr(from_acc.account_type, 'name') else str(from_acc.account_type)
         
         is_income = False
         is_expense = False

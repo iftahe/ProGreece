@@ -1,109 +1,151 @@
-from sqlalchemy.orm import Session
-from typing import List, Dict, Optional, Any
-from decimal import Decimal
-import models
+import sqlite3
+from database import get_db_connection
+from collections import defaultdict
 
+def normalize_string(s):
+    """Normalize string for case-insensitive comparison"""
+    if s is None:
+        return ""
+    return str(s).strip().lower()
 
-def generate_budget_report(db: Session, project_id: int) -> List[Dict[str, Any]]:
+def get_budget_report(project_id):
     """
-    Generates a Budget Report showing:
-    - Budget categories (both parent phases and child categories)
-    - Planned budget amounts
-    - Actual amounts (from transactions)
-    - Variances (Actual - Planned)
-    - Progress percentages
-    - Parent totals (sum of children)
+    מחזיר את דוח התקציב: משווה בין התקציב המתוכנן (budget_categories)
+    לבין ההוצאות בפועל (transactions).
+    מבצע התאמה case-insensitive בין קטגוריות.
     """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # 1. שליפת כל קטגוריות התקציב לפרויקט
+    cursor.execute("""
+        SELECT id, category_name, planned_amount
+        FROM budget_categories
+        WHERE project_id = ?
+    """, (project_id,))
+    budget_rows = cursor.fetchall()
+
+    # 2. שליפת סיכום הוצאות בפועל לפי קטגוריה
+    # Check both 'type' field (legacy) and 'transaction_type' field
+    # transaction_type = 1 means Executed, and we want expenses
+    cursor.execute("""
+        SELECT 
+            budget_item_id,
+            category, 
+            SUM(amount) as total_actual
+        FROM transactions
+        WHERE project_id = ? 
+          AND (
+            type = 'expense' 
+            OR transaction_type = 1
+          )
+        GROUP BY budget_item_id, category
+    """, (project_id,))
+    actual_rows = cursor.fetchall()
+
+    conn.close()
+
+    # Create maps for matching:
+    # 1. By budget_item_id (most accurate)
+    # 2. By normalized category name (case-insensitive fallback)
+    actual_by_budget_id = defaultdict(float)
+    actual_by_category = defaultdict(float)
     
-    # Fetch all budget categories for the project
-    categories = db.query(models.BudgetCategory).filter(
-        models.BudgetCategory.project_id == project_id
-    ).all()
-    
-    # Fetch all transactions for the project
-    transactions = db.query(models.Transaction).filter(
-        models.Transaction.project_id == project_id
-    ).all()
-    
-    # Build a map of category_id -> list of transactions
-    # Only count executed transactions (transaction_type = 1) for actuals
-    category_transactions = {}
-    for tx in transactions:
-        if tx.budget_item_id and tx.transaction_type == 1:  # Only executed transactions
-            if tx.budget_item_id not in category_transactions:
-                category_transactions[tx.budget_item_id] = []
-            category_transactions[tx.budget_item_id].append(tx)
-    
-    # Calculate actual amounts per category
-    # Use absolute values since budget categories are typically expense categories
-    category_actuals = {}
-    for category_id, txs in category_transactions.items():
-        # Sum absolute values of transaction amounts for this category
-        total = sum(abs(Decimal(str(tx.amount))) if tx.amount else Decimal(0) for tx in txs)
-        category_actuals[category_id] = total
-    
-    # Build hierarchy and calculate parent totals
-    # Separate parents (phases) and children
-    parents = [cat for cat in categories if cat.parent_id is None]
-    children_map = {}
-    for cat in categories:
-        if cat.parent_id:
-            if cat.parent_id not in children_map:
-                children_map[cat.parent_id] = []
-            children_map[cat.parent_id].append(cat)
-    
+    for row in actual_rows:
+        amount = float(row['total_actual'] or 0)
+        budget_item_id = row['budget_item_id']
+        category = row['category']
+        
+        # Match by budget_item_id if available (most accurate)
+        if budget_item_id:
+            actual_by_budget_id[budget_item_id] += amount
+        
+        # Also index by normalized category name for fallback matching
+        if category:
+            normalized_category = normalize_string(category)
+            actual_by_category[normalized_category] += amount
+
     report = []
-    
-    # Process each parent (phase)
-    for parent in sorted(parents, key=lambda x: x.id):
-        # Calculate children totals
-        children = children_map.get(parent.id, [])
-        children_planned_total = sum(Decimal(str(child.amount)) if child.amount else Decimal(0) for child in children)
-        children_actual_total = sum(category_actuals.get(child.id, Decimal(0)) for child in children)
+    total_planned = 0
+    total_actual = 0
+
+    for item in budget_rows:
+        budget_id = item['id']
+        cat_name = item['category_name']
+        planned = float(item['planned_amount'] or 0)
         
-        # Parent planned: use parent's own amount if set, otherwise sum of children
-        parent_planned = Decimal(str(parent.amount)) if parent.amount else Decimal(0)
-        effective_planned = parent_planned if parent_planned > 0 else children_planned_total
+        # First try to match by budget_item_id (most accurate)
+        actual = actual_by_budget_id.get(budget_id, 0)
         
-        # Parent actual: sum of children's actuals (parents typically don't have direct transactions)
-        # But also include parent's own transactions if any
-        parent_actual = category_actuals.get(parent.id, Decimal(0))
-        effective_actual = children_actual_total + parent_actual
+        # If no match by ID, fall back to case-insensitive category name matching
+        if actual == 0:
+            normalized_budget_cat = normalize_string(cat_name)
+            actual = actual_by_category.get(normalized_budget_cat, 0)
         
-        variance = effective_actual - effective_planned
-        progress = (float(effective_actual) / float(effective_planned) * 100) if effective_planned > 0 else 0
-        
+        variance = planned - actual
+        progress = (actual / planned * 100) if planned > 0 else 0
+
+        total_planned += planned
+        total_actual += actual
+
         report.append({
-            "id": parent.id,
-            "name": parent.name,
-            "parent_id": None,
-            "is_parent": True,
-            "planned": float(effective_planned),
-            "actual": float(effective_actual),
-            "variance": float(variance),
-            "progress": progress,
-            "children_planned_total": float(children_planned_total),
-            "children_actual_total": float(children_actual_total)
+            "id": item['id'],
+            "name": cat_name,  # Changed from "category" to "name" to match frontend
+            "planned": planned,
+            "actual": actual,
+            "variance": variance,
+            "progress": round(progress, 2),
+            "is_parent": False  # Add is_parent field for frontend compatibility
         })
-        
-        # Add children rows
-        for child in sorted(children, key=lambda x: x.id):
-            child_planned = Decimal(str(child.amount)) if child.amount else Decimal(0)
-            child_actual = category_actuals.get(child.id, Decimal(0))
-            child_variance = child_actual - child_planned
-            child_progress = (float(child_actual) / float(child_planned) * 100) if child_planned > 0 else 0
-            
-            report.append({
-                "id": child.id,
-                "name": child.name,
-                "parent_id": child.parent_id,
-                "is_parent": False,
-                "planned": float(child_planned),
-                "actual": float(child_actual),
-                "variance": float(child_variance),
-                "progress": child_progress,
-                "children_planned_total": None,
-                "children_actual_total": None
-            })
-    
+
+    # Only return report items (frontend expects array, not dict with items/summary)
+    # The frontend iterates over reportData directly
     return report
+
+def update_budget_item(item_id, new_amount):
+    """עדכון סכום מתוכנן לקטגוריה"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE budget_categories
+        SET planned_amount = ?
+        WHERE id = ?
+    """, (new_amount, item_id))
+    conn.commit()
+    conn.close()
+    return True
+
+def initialize_project_budget(project_id):
+    """
+    יוצר קטגוריות תקציב דיפולטיביות לפרויקט חדש אם עדיין אין לו.
+    """
+    default_categories = [
+        ("Buying", 500000),
+        ("License", 50000),
+        ("Realtor", 50000),
+        ("Law", 50000),
+        ("Buy Tax", 50000),
+        ("Notary", 50000),
+        ("Construction", 2000000),
+        ("Materials", 100000),
+        ("Architect", 100000),
+        ("Unforeseen", 50000)
+    ]
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # בדיקה אם כבר יש קטגוריות
+    cursor.execute("SELECT COUNT(*) FROM budget_categories WHERE project_id = ?", (project_id,))
+    count = cursor.fetchone()[0]
+
+    if count == 0:
+        print(f"Creating default budget for project {project_id}...")
+        for cat_name, default_amount in default_categories:
+            cursor.execute("""
+                INSERT INTO budget_categories (project_id, category_name, planned_amount)
+                VALUES (?, ?, ?)
+            """, (project_id, cat_name, default_amount))
+        conn.commit()
+    
+    conn.close()
