@@ -1,0 +1,77 @@
+﻿ID,Date,Phaze,from,to,Amount,VAT,Withholding,Remarks,from key,to key,phaze key,project key
+1,7/12/2024 0:00,Construction,ProGreece incom,registry,1100,0.24,,Land Registry the property in Orfanidou 4 6th floor splitting,49,56,11,7
+2,7/12/2024 0:00,Construction,ProGreece incom,registry,1186.71,0.24,,Land registry Kosti Palama 14A 3rd Floor - modification of horizontal properties and distribution contract,49,56,11,7
+3,5/30/2023 0:00,,Orfanido_4_floor_6 Trust,ProGreece incom,38021,,,,102,49,0,7
+4,12/20/2023 0:00,,Orfanido_4_floor_6 Trust,ProGreece incom,15000,,,,102,49,0,7
+5,1/10/2024 0:00,,Orfanido_4_floor_6 Trust,ProGreece incom,20000,,,,102,49,0,7
+6,2/6/2024 0:00,,Orfanido_4_floor_6 Trust,ProGreece incom,10000,,,,102,49,0,7
+7,2/15/2024 0:00,,Orfanido_4_floor_6 Trust,ProGreece incom,10000,,,,102,49,0,7
+8,4/10/2024 0:00,,Orfanido_4_floor_6 Trust,ProGreece incom,30000,,,,102,49,0,7
+9,4/24/2024 0:00,,Orfanido_4_floor_6 Trust,ProGreece incom,7785,,,,102,49,0,7
+10,7/4/2024 0:00,,Orfanido_4_floor_6 Trust,ProGreece incom,39765,,,,102,49,0,7
+11,5/21/2023 0:00,Buying,Orfanido_4_floor_6 Trust,Orfanido_4_floor_6 Owner,132779,,,,102,109,13,7
+12,5/14/2023 0:00,Advance payment,Alexandru kotovski miclescu,ProGreece Israel,1000,,,,103,110,10,7
+13,11/5/2023 0:00,Advance payment,SHIRA GEFEN,ProGreece Israel,1000,,,,104,110,10,7
+14,9/3/2023 0:00,Advance payment,Avital Rosenberger,ProGreece Israel,1000,,,,3,110,10,7
+15,7/17/2023 0:00,Advance payment,Tal granit reina,ProGreece Israel,1000,,,,105,110,10,7
+16,11/5/2023 0:00,Advance payment,lucia paula feldstein weiss,ProGreece Israel,1000,,,,106,110,10,7
+17,5/14/2023 0:00,Buying,Alexandru kotovski miclescu,Orfanido_4_floor_6 Trust,39650,,,,103,102,13,7
+18,11/5/2023 0:00,Buying,SHIRA GEFEN,Orfanido_4_floor_6 Trust,46750,,,,104,102,13,7
+19,5/26/2023 0:00,Buying,Avital Rosenberger,Orfanido_4_floor_6 Owner,42221.1,,,,3,109,13,7
+20,7/17/2023 0:00,Buying,Tal granit reina,Orfanido_4_floor_6 Trust,43150,,,,105,102,13,7
+21,11/5/2023 0:00,Buying,lucia paula feldstein weiss,Orfanido_4_floor_6 Trust,41250,,,,106,102,13,7
+22,11/14/2023 0:00,Construction,Tal granit reina,Orfanido_4_floor_6 Trust,30905,,,,105,102,11,7
+23,11/16/2023 0:00,Construction,SHIRA GEFEN,Orfanido_4_floor_6 Trust,33425,,,,104,102,11,7
+24,11/22/2022 0:00,Advance payment,ProGreece incom,buying,9000,,,Preliminary contract payments for Orfanido_4_floor_6,49,61,10,7
+25,11/22/2022 0:00,Advance payment,ProGreece incom,buying,9000,,,Preliminary contract payments for Orfanido_4_floor_6,49,61,10,7
+26,2/2/2023 0:00,Buying,ProGreece incom,License,15,,,License payment for Orfanido_4_floor_6-TEE,49,53,13,7
+27,2/2/2023 0:00,Buying,ProGreece incom,License,250,,,License payment for Orfanido_4_floor_6-TEE,49,53,13,7
+28,5/4/2023 0:00,Buying,ProGreece incom,buy tax,1071.33,,,Transfer tax payment,49,52,13,7
+29,5/4/2023 0:00,Buying,ProGreece incom,buy tax,1135.2,,,Transfer tax payment,49,52,13,7
+30,5/4/2023 0:00,Buying,ProGreece incom,buy tax,1076.76,,,Transfer tax payment,49,52,13,7
+31,5/4/2023 0:00,Buying,ProGreece incom,buy tax,1437.68,,,Transfer tax payment,49,52,13,7
+32,5/4/2023 0:00,Buying,ProGreece incom,buy tax,1304.52,,,Transfer tax payment,49,52,13,7
+33,5/17/2023 0:00,Buying,ProGreece incom,buying,2000,,,Downpayment ,49,61,13,7
+34,5/25/2023 0:00,Buying,ProGreece incom,registry,1044.6,,,Bank cheque no.100508-1 for contract land registry ,49,56,13,7
+35,6/21/2023 0:00,Buying,ProGreece incom,notary,2499.16,,,Notary for Purchase Contract 1552,49,55,13,7
+36,11/3/2023 0:00,Construction,ProGreece incom,License,20,,,License payment TEE,49,53,11,7
+37,12/22/2023 0:00,Construction,ProGreece incom,Additional payments,500.01,,,Construction Insurance payment - Interasco Orfanido_4_floor_6,49,64,11,7
+38,12/8/2023 0:00,Construction,ProGreece incom,Construction,665.5,0.24,0.03,ADAM IKE Inv.121 Orfanido_4_floor_6 new water column,49,59,11,7
+39,12/15/2023 0:00,Construction,ProGreece incom,Additional payments,1341.03,,0,Dedie for new electricity connection,49,64,11,7
+40,12/12/2023 0:00,Construction,ProGreece incom,Construction,1361.25,0.24,0.03,ADAM IKE Inv.123 Orfanido_4_floor_6,49,59,11,7
+41,12/8/2023 0:00,Construction,ProGreece incom,Construction,4710.33,,0.03,ADAM IKE Inv.121 Orfanidou 4 6th,49,59,11,7
+42,12/20/2023 0:00,Construction,ProGreece incom,Construction,12100,0.24,0.03,ADAM IKE Inv.127 Orfanido_4_floor_6,49,59,11,7
+43,2/8/2024 0:00,Construction,ProGreece incom,Construction,7260,0.24,0.03,ADAM IKE Inv.140 Orfanido_4_floor_6,49,59,11,7
+44,1/31/2024 0:00,Construction,ProGreece incom,Construction,6050,0.24,0.03,ADAM IKE Inv.129,49,59,11,7
+45,1/18/2024 0:00,Construction,ProGreece incom,Construction,12100,0.24,0.03,ADAM IKE Inv.134 Orfanido_4_floor_6,49,59,11,7
+46,1/8/2024 0:00,Construction,ProGreece incom,Construction,6050,0.24,0.03,ADAM IKE Inv.131 Orfanido_4_floor_6,49,59,11,7
+47,2/21/2024 0:00,Construction,ProGreece incom,Construction,12100,0.24,0.03,ADAM IKE Inv.145 Orfanido_4_floor_6,49,59,11,7
+48,2/15/2024 0:00,Construction,ProGreece incom,Construction,6050,0.24,0.03,ADAM IKE Inv.143 Orfanido_4_floor_6,49,59,11,7
+49,2/29/2024 0:00,Construction,ProGreece incom,Construction,6050,0.24,0.03,ADAM IKE Inv.147 Orfanido_4_floor_6,49,59,11,7
+50,2/29/2024 0:00,Construction,ProGreece incom,Additional payments,32.34,,,TAP for Orfanido_4_floor_6 - Municipality,49,64,11,7
+51,2/29/2024 0:00,Construction,ProGreece incom,Additional payments,49.64,,,TAP for Orfanido_4_floor_6 - Municipality,49,64,11,7
+52,2/29/2024 0:00,Construction,ProGreece incom,Construction,6050,0.24,0.03,ADAM IKE Inv.147 Orfanido_4_floor_6,49,59,11,7
+53,4/10/2024 0:00,Construction,ProGreece incom,Construction,12100,0.24,0.03,ADAM IKE Inv.159 Orfanido_4_floor_6,49,59,11,7
+54,2/29/2024 0:00,Construction,ProGreece incom,SMALL FURNITURE,2346.08,,,Chic Strom Sofas and Matresses ,49,107,11,7
+55,3/26/2024 0:00,Construction,ProGreece incom,SMALL FURNITURE,393,,,Velea home order pre-invoice 1004923544 - They returned the VAT ,49,107,11,7
+56,3/28/2024 0:00,Construction,ProGreece incom,SMALL FURNITURE,536.14,,,Inv.7351 Home Markt for Orfanidou 4 6th furniture,49,107,11,7
+57,3/15/2024 0:00,Construction,ProGreece incom,SMALL FURNITURE,647.28,0.24,,Chic Strom inv3541 - Furniture + 2 matresses,49,107,11,7
+58,3/15/2024 0:00,Construction,ProGreece incom,TV,1036,,,5x 43 inch TVs from the stock,49,108,11,7
+59,6/5/2024 0:00,Construction,ProGreece incom,Additional payments,614.2,,,Common Expenses July 2023 - April 2024,49,64,11,7
+60,5/30/2024 0:00,Construction,ProGreece incom,SMALL FURNITURE,92.5,0.24,,OTE order TV bases,49,107,11,7
+61,4/29/2024 0:00,Construction,ProGreece incom,Construction,361.44,0.24,,ENFIA 2023,49,59,11,7
+62,6/28/2024 0:00,Construction,ProGreece incom,registry,15,,,Cadastral office payment,49,56,11,7
+63,6/28/2024 0:00,Construction,ProGreece incom,buy tax,356.01,,,Buying tax ,49,52,11,7
+64,6/28/2024 0:00,Construction,ProGreece incom,buy tax,388.91,,,Buying tax ,49,52,11,7
+65,6/28/2024 0:00,Construction,ProGreece incom,buy tax,418.92,,,Buying tax ,49,52,11,7
+66,6/28/2024 0:00,Construction,ProGreece incom,buy tax,282.61,,,Buying tax ,49,52,11,7
+67,6/28/2024 0:00,Construction,ProGreece incom,buy tax,222.73,,,Buying tax ,49,52,11,7
+68,8/5/2024 0:00,Construction,ProGreece incom,law,832,0.24,,inv.235 lawyer fees for splitting,49,51,11,7
+69,11/15/2023 0:00,Construction,lucia paula feldstein weiss,ProGreece incom,29575,,,,106,49,11,7
+70,11/20/2023 0:00,Construction,Alexandru kotovski miclescu,Orfanido_4_floor_6 Trust,28455,,,,103,102,11,7
+71,12/7/2023 0:00,Construction,Avital Rosenberger,ProGreece incom,32200,,,,3,49,11,7
+72,11/6/2024 0:00,Final,SHIRA GEFEN,Orfanido_4_floor_6 Trust,14325,,,,104,102,18,7
+73,10/6/2024 0:00,Final,Tal granit reina,Orfanido_4_floor_6 Trust,13245,,,,105,102,18,7
+74,6/14/2023 0:00,Final,Alexandru kotovski miclescu,Orfanido_4_floor_6 Trust,12195,,,,103,102,18,7
+75,6/17/2023 0:00,Final,Avital Rosenberger,ProGreece incom,16579,,,,3,49,18,7
+76,1/7/2024 0:00,Final,lucia paula feldstein weiss,ProGreece incom,12660,,,,106,49,18,7
