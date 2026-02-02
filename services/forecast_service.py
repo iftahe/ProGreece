@@ -108,56 +108,41 @@ def generate_cash_flow_forecast(db: Session, project_id: Optional[int] = None) -
         amount = tx.amount if tx.amount else Decimal(0)
         
         # Determine Direction (Income vs Expense)
-        # User Rule 1: Income: If to_account is a Project/Income account -> Positive (+)
-        # User Rule 2: Expense: If to_account is a Supplier/Expense account (or from_account is the Project) -> Negative (-)
-        
-        # We need heuristics for "Project/Income account" vs "Supplier/Expense account"
-        # Since we don't have hardcoded IDs, we will try to match strings or assume Project accounts are specific types.
-        # Let's inspect what we typically have.
-        # "Project/Income" often implies the account belongs to the project or is a revenue account.
-        # "Supplier/Expense" implies external.
-        
-        to_acc = account_map.get(tx.to_account_id)
-        from_acc = account_map.get(tx.from_account_id)
-        
-        to_type = ""
-        if to_acc and to_acc.account_type:
-            to_type = to_acc.account_type.name if hasattr(to_acc.account_type, 'name') else str(to_acc.account_type)
-        
-        from_type = ""
-        if from_acc and from_acc.account_type:
-            from_type = from_acc.account_type.name if hasattr(from_acc.account_type, 'name') else str(from_acc.account_type)
-        
+        # Primary check: use the transaction's 'type' field (set by import script)
         is_income = False
         is_expense = False
-        
-        # Refined Logic based on user prompt:
-        # "to_account is a Project/Income account"
-        # usage of string matching for robustness
-        if to_type and ("project" in to_type.lower() or "income" in to_type.lower() or "bank" in to_type.lower() and "project" in (to_acc.name or "").lower()):
-             is_income = True
-        
-        # "to_account is a Supplier/Expense account"
-        elif to_type and ("supplier" in to_type.lower() or "expense" in to_type.lower()):
+
+        if tx.type and tx.type.strip().lower() == 'income':
+            is_income = True
+        elif tx.type and tx.type.strip().lower() == 'expense':
             is_expense = True
-            
-        # "from_account is the Project" -> Expense (paying out)
-        elif from_type and ("project" in from_type.lower()):
-             is_expense = True
-             
-        # Fallback/Default behavior if ambiguous? 
-        # For now, let's treat unknown as Expense if it's not clearly Income, to be conservative? 
-        # Or maybe just skip? Let's check if 'transaction_type' helps.
-        # Legacy DB might have transaction_type.
-        
+
+        # Secondary check: if type field is missing, try account-type based classification
+        if not is_income and not is_expense:
+            to_acc = account_map.get(tx.to_account_id)
+            from_acc = account_map.get(tx.from_account_id)
+
+            to_type = ""
+            if to_acc and to_acc.account_type:
+                to_type = to_acc.account_type.name if hasattr(to_acc.account_type, 'name') else str(to_acc.account_type)
+
+            from_type = ""
+            if from_acc and from_acc.account_type:
+                from_type = from_acc.account_type.name if hasattr(from_acc.account_type, 'name') else str(from_acc.account_type)
+
+            if to_type and ("project" in to_type.lower() or "income" in to_type.lower()):
+                is_income = True
+            elif to_type and ("supplier" in to_type.lower() or "expense" in to_type.lower()):
+                is_expense = True
+            elif from_type and ("project" in from_type.lower()):
+                is_expense = True
+            else:
+                # Default to expense if no classification could be determined
+                is_expense = True
+
         if is_income:
             monthly_data[month_key]["actual_income"] += amount
-        elif is_expense:
-            monthly_data[month_key]["actual_expense"] += amount
         else:
-            # If we can't determine, we might check the 'transaction_type' column if it exists and carries meaning.
-            # For now, if we can't determine, maybe we treat it as expense or ignore?
-            # Let's assume it's an expense if it's an outgoing flow not captured above.
             monthly_data[month_key]["actual_expense"] += amount
 
     # ---------------------------------------------------------

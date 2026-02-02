@@ -99,8 +99,8 @@ def update_project(project_id: int, project: schemas.ProjectCreate, db: Session 
     return db_project
 
 @app.get("/transactions/", response_model=List[schemas.Transaction])
-def read_transactions(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    transactions = db.query(models.Transaction).offset(skip).limit(limit).all()
+def read_transactions(skip: int = 0, limit: int = 10000, db: Session = Depends(get_db)):
+    transactions = db.query(models.Transaction).order_by(models.Transaction.date.desc()).offset(skip).limit(limit).all()
     return transactions
 
 @app.post("/transactions/", response_model=schemas.Transaction)

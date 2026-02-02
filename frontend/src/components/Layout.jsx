@@ -1,49 +1,105 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { DashboardIcon, TransactionsIcon, ProjectsIcon, BudgetIcon, MenuIcon, CloseIcon } from './Icons';
+import { cn } from '../lib/utils';
 
-const Layout = ({ children }) => {
+const navigation = [
+    { name: 'Dashboard', href: '/', icon: DashboardIcon },
+    { name: 'Transactions', href: '/transactions', icon: TransactionsIcon },
+    { name: 'Projects', href: '/projects', icon: ProjectsIcon },
+    { name: 'Budget Report', href: '/budget-report', icon: BudgetIcon },
+];
+
+const SidebarContent = ({ onLinkClick }) => {
     const location = useLocation();
 
-    const navigation = [
-        { name: 'Dashboard', href: '/' },
-        { name: 'Transactions', href: '/transactions' },
-        { name: 'Projects', href: '/projects' },
-        { name: 'Budget Report', href: '/budget-report' },
-    ];
+    return (
+        <div className="flex flex-col h-full bg-sidebar">
+            {/* Branding */}
+            <div className="flex items-center gap-3 px-5 py-6 border-b border-white/10">
+                <div className="w-9 h-9 rounded-lg bg-primary-500 flex items-center justify-center">
+                    <span className="text-white font-bold text-lg">P</span>
+                </div>
+                <span className="text-white text-xl font-bold tracking-tight">ProGreece</span>
+            </div>
+
+            {/* Navigation */}
+            <nav className="flex-1 px-3 py-4 space-y-1">
+                {navigation.map((item) => {
+                    const isActive = location.pathname === item.href;
+                    const Icon = item.icon;
+                    return (
+                        <Link
+                            key={item.name}
+                            to={item.href}
+                            onClick={onLinkClick}
+                            className={cn(
+                                'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
+                                isActive
+                                    ? 'bg-sidebar-active text-white'
+                                    : 'text-slate-300 hover:bg-sidebar-hover hover:text-white'
+                            )}
+                        >
+                            <Icon className="w-5 h-5 flex-shrink-0" />
+                            {item.name}
+                        </Link>
+                    );
+                })}
+            </nav>
+
+            {/* Footer */}
+            <div className="px-5 py-4 border-t border-white/10">
+                <p className="text-slate-500 text-xs">Real Estate Management</p>
+            </div>
+        </div>
+    );
+};
+
+const Layout = ({ children }) => {
+    const [sidebarOpen, setSidebarOpen] = useState(false);
 
     return (
-        <div className="min-h-screen bg-gray-100 flex">
-            {/* Sidebar */}
-            <div className="hidden md:flex md:w-64 md:flex-col fixed inset-y-0">
-                <div className="flex flex-col flex-grow bg-white border-r border-gray-200 pt-5 pb-4 overflow-y-auto">
-                    <div className="flex items-center flex-shrink-0 px-4 mb-5">
-                        <h1 className="text-xl font-bold text-blue-600">Greece Project</h1>
+        <div className="min-h-screen bg-slate-50">
+            {/* Desktop sidebar */}
+            <div className="hidden md:fixed md:inset-y-0 md:left-0 md:z-30 md:flex md:w-64 md:flex-col">
+                <SidebarContent />
+            </div>
+
+            {/* Mobile overlay */}
+            {sidebarOpen && (
+                <div className="fixed inset-0 z-40 md:hidden">
+                    <div className="fixed inset-0 bg-black/50" onClick={() => setSidebarOpen(false)} />
+                    <div className="fixed inset-y-0 left-0 z-50 w-64 flex flex-col">
+                        <SidebarContent onLinkClick={() => setSidebarOpen(false)} />
                     </div>
-                    <div className="mt-5 flex-grow flex flex-col">
-                        <nav className="flex-1 px-2 space-y-1">
-                            {navigation.map((item) => {
-                                const isActive = location.pathname === item.href;
-                                return (
-                                    <Link
-                                        key={item.name}
-                                        to={item.href}
-                                        className={`group flex items-center px-2 py-2 text-sm font-medium rounded-md transition-colors ${isActive
-                                            ? 'bg-blue-50 text-blue-700'
-                                            : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                                            }`}
-                                    >
-                                        {item.name}
-                                    </Link>
-                                );
-                            })}
-                        </nav>
+                    <button
+                        className="fixed top-4 left-[17rem] z-50 p-1 rounded-full bg-sidebar text-white"
+                        onClick={() => setSidebarOpen(false)}
+                    >
+                        <CloseIcon className="w-5 h-5" />
+                    </button>
+                </div>
+            )}
+
+            {/* Mobile header */}
+            <div className="md:hidden fixed top-0 left-0 right-0 z-20 bg-white border-b border-gray-200 h-14 flex items-center px-4 gap-3">
+                <button
+                    onClick={() => setSidebarOpen(true)}
+                    className="p-1.5 rounded-lg text-gray-600 hover:bg-gray-100"
+                >
+                    <MenuIcon />
+                </button>
+                <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-md bg-primary-500 flex items-center justify-center">
+                        <span className="text-white font-bold text-sm">P</span>
                     </div>
+                    <span className="font-bold text-gray-900">ProGreece</span>
                 </div>
             </div>
 
             {/* Main content */}
             <div className="flex flex-col flex-1 md:pl-64">
-                <main className="flex-1">
+                <main className="flex-1 pt-14 md:pt-0">
                     <div className="py-6">
                         <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-8">
                             {children}

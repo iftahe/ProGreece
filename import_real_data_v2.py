@@ -6,6 +6,11 @@ Changes from v1:
   2. Smart income/expense classification based on from/to fields.
   3. Amount cleaning handles commas in numbers.
   4. Clean start: deletes existing transactions before import.
+Changes in v2.1:
+  5. Maps CSV 'from'/'to' to from_account_id/to_account_id via accounts table.
+  6. Saves CSV 'Remarks' to both 'remarks' and 'description' columns.
+  7. Sets transaction_type=1 (Executed) for all imported rows.
+  8. Attempts to match CSV 'Phaze' to budget_item_id via budget_categories.
 """
 import pandas as pd
 import sqlite3
@@ -42,6 +47,16 @@ def clean_amount(value):
         return 0.0
 
 
+def safe_str(value, default=''):
+    """Convert a value to string, treating NaN/None as the default."""
+    if pd.isna(value):
+        return default
+    text = str(value).strip()
+    if text.lower() == 'nan':
+        return default
+    return text
+
+
 def classify_transaction(from_acc, to_acc):
     """Determine if a transaction is 'income' or 'expense' based on direction.
 
@@ -71,7 +86,7 @@ def classify_transaction(from_acc, to_acc):
 
 
 def run_import():
-    print("Starting v2 import...")
+    print("Starting v2.1 import...")
 
     if not os.path.exists(FILE_TRANSACTIONS) or not os.path.exists(FILE_PROJECTS):
         print("ERROR: One or more CSV files are missing.")
@@ -115,6 +130,45 @@ def run_import():
     cursor.execute("SELECT id, name FROM projects")
     db_projects = {row['name']: row['id'] for row in cursor.fetchall()}
 
+    # ---- Step 1.5: Load accounts for name->id mapping ----
+    print("[1.5] Loading accounts for mapping...")
+    cursor.execute("SELECT id, name FROM accounts")
+    db_accounts_by_name = {}
+    for row in cursor.fetchall():
+        db_accounts_by_name[row['name'].strip().lower()] = row['id']
+    print(f"    Found {len(db_accounts_by_name)} existing accounts.")
+
+    def find_or_create_account(name_raw):
+        """Look up an account by name; create it if it doesn't exist. Returns id or None."""
+        if not name_raw:
+            return None
+        key = name_raw.strip().lower()
+        if not key:
+            return None
+        if key in db_accounts_by_name:
+            return db_accounts_by_name[key]
+        # Auto-create the missing account
+        cursor.execute(
+            "INSERT INTO accounts (name, is_system_account) VALUES (?, 0)",
+            (name_raw.strip(),)
+        )
+        conn.commit()
+        new_id = cursor.lastrowid
+        db_accounts_by_name[key] = new_id
+        return new_id
+
+    count_accounts_created = 0
+
+    # ---- Step 1.6: Load budget categories for phaze->id mapping ----
+    print("[1.6] Loading budget categories for mapping...")
+    # Build a map of (project_id, normalized_category_name) -> budget_category_id
+    cursor.execute("SELECT id, project_id, category_name FROM budget_categories")
+    budget_cat_map = {}
+    for row in cursor.fetchall():
+        key = (row['project_id'], row['category_name'].strip().lower())
+        budget_cat_map[key] = row['id']
+    print(f"    Found {len(budget_cat_map)} budget categories.")
+
     # ---- Step 2: Load transactions ----
     print("[2] Reading transactions file...")
     try:
@@ -126,6 +180,8 @@ def run_import():
     count_skipped = 0
     count_income = 0
     count_expense = 0
+    count_accounts_mapped = 0
+    count_budget_mapped = 0
 
     for index, row in df_trans.iterrows():
         try:
@@ -150,11 +206,24 @@ def run_import():
                 continue
 
             date_val = parse_date(row.get('Date'))
-            category = str(row.get('Phaze', 'General'))
-            description = str(row.get('Remarks', ''))
-            supplier = str(row.get('to', ''))
-            from_acc = str(row.get('from', ''))
-            to_acc = str(row.get('to', ''))
+            category = safe_str(row.get('Phaze'), 'General')
+            remarks = safe_str(row.get('Remarks'))
+            supplier = safe_str(row.get('to'))
+            from_acc = safe_str(row.get('from'))
+            to_acc = safe_str(row.get('to'))
+
+            # Find or create accounts by name
+            from_account_id = find_or_create_account(from_acc)
+            to_account_id = find_or_create_account(to_acc)
+            if from_account_id or to_account_id:
+                count_accounts_mapped += 1
+
+            # Try to match phaze/category to budget_item_id
+            budget_item_id = budget_cat_map.get(
+                (new_project_id, category.strip().lower())
+            )
+            if budget_item_id:
+                count_budget_mapped += 1
 
             tx_type = classify_transaction(from_acc, to_acc)
 
@@ -165,9 +234,13 @@ def run_import():
 
             cursor.execute(
                 """INSERT INTO transactions
-                   (project_id, date, amount, category, description, supplier, type)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (new_project_id, date_val, amount, category, description, supplier, tx_type),
+                   (project_id, date, amount, category, description, supplier,
+                    type, remarks, transaction_type,
+                    from_account_id, to_account_id, budget_item_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (new_project_id, date_val, amount, category, remarks, supplier,
+                 tx_type, remarks, 1,
+                 from_account_id, to_account_id, budget_item_id),
             )
             count_inserted += 1
 
@@ -187,17 +260,24 @@ def run_import():
     except Exception as e:
         print(f"    WARN: Could not initialize budgets: {e}")
 
+    # Count how many accounts exist now
+    cursor.execute("SELECT COUNT(*) FROM accounts")
+    total_accounts = cursor.fetchone()[0]
+
     conn.close()
 
     # ---- Summary ----
     print("\n" + "=" * 50)
     print("IMPORT SUMMARY")
     print("=" * 50)
-    print(f"  Total CSV rows:  {len(df_trans)}")
-    print(f"  Inserted:        {count_inserted}")
-    print(f"    - income:      {count_income}")
-    print(f"    - expense:     {count_expense}")
-    print(f"  Skipped:         {count_skipped}")
+    print(f"  Total CSV rows:    {len(df_trans)}")
+    print(f"  Inserted:          {count_inserted}")
+    print(f"    - income:        {count_income}")
+    print(f"    - expense:       {count_expense}")
+    print(f"  Skipped:           {count_skipped}")
+    print(f"  Accounts linked:   {count_accounts_mapped}")
+    print(f"  Total accounts:    {total_accounts}")
+    print(f"  Budget cat mapped: {count_budget_mapped}")
     print("=" * 50)
 
     # ---- Verify the two reported issues ----
