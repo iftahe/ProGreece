@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { getBudgetReport, updateBudgetCategory, getProjects } from '../api';
-import { PencilIcon, CheckIcon, XIcon, EmptyStateIcon } from '../components/Icons';
+import { PencilIcon, CheckIcon, XIcon, EmptyStateIcon, CalendarPlanIcon } from '../components/Icons';
+import BudgetPlanEditor from '../components/BudgetPlanEditor';
 import { cn, formatEUR, formatEURDecimal, formatPercent } from '../lib/utils';
 
 const SkeletonBudgetReport = () => (
@@ -31,6 +32,7 @@ const BudgetReport = () => {
     const [editingId, setEditingId] = useState(null);
     const [editValue, setEditValue] = useState('');
     const [message, setMessage] = useState(null);
+    const [planningCategoryId, setPlanningCategoryId] = useState(null);
 
     useEffect(() => {
         getProjects().then((projs) => {
@@ -164,6 +166,7 @@ const BudgetReport = () => {
                                     <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actual</th>
                                     <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Variance</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-48">Progress</th>
+                                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-20">Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100 text-sm">
@@ -171,92 +174,122 @@ const BudgetReport = () => {
                                     const isChild = !item.is_parent;
                                     const childIndex = isChild ? reportData.slice(0, index).filter(r => !r.is_parent).length : -1;
                                     return (
-                                        <tr
-                                            key={item.id}
-                                            className={cn(
-                                                'hover:bg-gray-50',
-                                                item.is_parent && 'bg-slate-100',
-                                                isChild && childIndex % 2 !== 0 && 'bg-slate-50/50'
-                                            )}
-                                        >
-                                            <td className={cn(
-                                                'px-6 py-3 whitespace-nowrap',
-                                                item.is_parent ? 'font-bold text-gray-900' : 'text-gray-700 pl-10'
-                                            )}>
-                                                {item.name}
-                                            </td>
-                                            <td className="px-6 py-3 whitespace-nowrap text-right">
-                                                {editingId === item.id ? (
-                                                    <div className="flex items-center justify-end gap-1.5">
-                                                        <input
-                                                            type="number"
-                                                            step="0.01"
-                                                            min="0"
-                                                            value={editValue}
-                                                            onChange={(e) => setEditValue(e.target.value)}
-                                                            className="input-field w-32 !mt-0 text-right text-sm !py-1"
-                                                            autoFocus
-                                                        />
-                                                        <button
-                                                            onClick={() => handleSaveEdit(item.id)}
-                                                            className="p-1 rounded text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50 transition-colors"
-                                                            title="Save"
-                                                            disabled={saving}
-                                                        >
-                                                            <CheckIcon className="w-4 h-4" />
-                                                        </button>
-                                                        <button
-                                                            onClick={handleCancelEdit}
-                                                            className="p-1 rounded text-rose-600 hover:text-rose-800 hover:bg-rose-50 transition-colors"
-                                                            title="Cancel"
-                                                            disabled={saving}
-                                                        >
-                                                            <XIcon className="w-4 h-4" />
-                                                        </button>
-                                                    </div>
-                                                ) : (
-                                                    <div className="flex items-center justify-end gap-1.5">
-                                                        <span className={item.is_parent ? 'font-bold' : ''}>{formatEURDecimal(item.planned)}</span>
-                                                        <button
-                                                            onClick={() => handleEditClick(item)}
-                                                            className="p-1 rounded text-gray-300 hover:text-primary-600 hover:bg-primary-50 transition-colors"
-                                                            title="Edit budget"
-                                                            disabled={saving}
-                                                        >
-                                                            <PencilIcon className="w-3.5 h-3.5" />
-                                                        </button>
-                                                    </div>
+                                        <React.Fragment key={item.id}>
+                                            <tr
+                                                className={cn(
+                                                    'hover:bg-gray-50',
+                                                    item.is_parent && 'bg-slate-100',
+                                                    isChild && childIndex % 2 !== 0 && 'bg-slate-50/50'
                                                 )}
-                                            </td>
-                                            <td className={cn('px-6 py-3 whitespace-nowrap text-right', item.is_parent && 'font-bold')}>
-                                                {formatEURDecimal(item.actual)}
-                                            </td>
-                                            <td className={cn(
-                                                'px-6 py-3 whitespace-nowrap text-right font-medium',
-                                                item.variance >= 0 ? 'text-emerald-600' : 'text-rose-600'
-                                            )}>
-                                                {item.variance >= 0 ? '+' : ''}{formatEURDecimal(item.variance)}
-                                            </td>
-                                            <td className="px-6 py-3 whitespace-nowrap">
-                                                <div className="flex items-center gap-2">
-                                                    <div className="flex-1 bg-gray-200 rounded-full h-2">
-                                                        <div
-                                                            className={cn(
-                                                                'h-2 rounded-full transition-all',
-                                                                item.progress <= 100 ? 'bg-primary-500' : 'bg-rose-500'
-                                                            )}
-                                                            style={{ width: `${Math.min(item.progress, 100)}%` }}
-                                                        />
+                                            >
+                                                <td className={cn(
+                                                    'px-6 py-3 whitespace-nowrap',
+                                                    item.is_parent ? 'font-bold text-gray-900' : 'text-gray-700 pl-10'
+                                                )}>
+                                                    {item.name}
+                                                </td>
+                                                <td className="px-6 py-3 whitespace-nowrap text-right">
+                                                    {editingId === item.id ? (
+                                                        <div className="flex items-center justify-end gap-1.5">
+                                                            <input
+                                                                type="number"
+                                                                step="0.01"
+                                                                min="0"
+                                                                value={editValue}
+                                                                onChange={(e) => setEditValue(e.target.value)}
+                                                                className="input-field w-32 !mt-0 text-right text-sm !py-1"
+                                                                autoFocus
+                                                            />
+                                                            <button
+                                                                onClick={() => handleSaveEdit(item.id)}
+                                                                className="p-1 rounded text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50 transition-colors"
+                                                                title="Save"
+                                                                disabled={saving}
+                                                            >
+                                                                <CheckIcon className="w-4 h-4" />
+                                                            </button>
+                                                            <button
+                                                                onClick={handleCancelEdit}
+                                                                className="p-1 rounded text-rose-600 hover:text-rose-800 hover:bg-rose-50 transition-colors"
+                                                                title="Cancel"
+                                                                disabled={saving}
+                                                            >
+                                                                <XIcon className="w-4 h-4" />
+                                                            </button>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="flex items-center justify-end gap-1.5">
+                                                            <span className={item.is_parent ? 'font-bold' : ''}>{formatEURDecimal(item.planned)}</span>
+                                                            <button
+                                                                onClick={() => handleEditClick(item)}
+                                                                className="p-1 rounded text-gray-300 hover:text-primary-600 hover:bg-primary-50 transition-colors"
+                                                                title="Edit budget"
+                                                                disabled={saving}
+                                                            >
+                                                                <PencilIcon className="w-3.5 h-3.5" />
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                </td>
+                                                <td className={cn('px-6 py-3 whitespace-nowrap text-right', item.is_parent && 'font-bold')}>
+                                                    {formatEURDecimal(item.actual)}
+                                                </td>
+                                                <td className={cn(
+                                                    'px-6 py-3 whitespace-nowrap text-right font-medium',
+                                                    item.variance >= 0 ? 'text-emerald-600' : 'text-rose-600'
+                                                )}>
+                                                    {item.variance >= 0 ? '+' : ''}{formatEURDecimal(item.variance)}
+                                                </td>
+                                                <td className="px-6 py-3 whitespace-nowrap">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="flex-1 bg-gray-200 rounded-full h-2">
+                                                            <div
+                                                                className={cn(
+                                                                    'h-2 rounded-full transition-all',
+                                                                    item.progress <= 100 ? 'bg-primary-500' : 'bg-rose-500'
+                                                                )}
+                                                                style={{ width: `${Math.min(item.progress, 100)}%` }}
+                                                            />
+                                                        </div>
+                                                        <span className={cn(
+                                                            'text-xs w-14 text-right font-medium',
+                                                            item.progress > 100 ? 'text-rose-600' : 'text-gray-600'
+                                                        )}>
+                                                            {formatPercent(item.progress)}%
+                                                        </span>
                                                     </div>
-                                                    <span className={cn(
-                                                        'text-xs w-14 text-right font-medium',
-                                                        item.progress > 100 ? 'text-rose-600' : 'text-gray-600'
-                                                    )}>
-                                                        {formatPercent(item.progress)}%
-                                                    </span>
-                                                </div>
-                                            </td>
-                                        </tr>
+                                                </td>
+                                                <td className="px-6 py-3 text-center">
+                                                    {isChild && (
+                                                        <button
+                                                            onClick={() => setPlanningCategoryId(planningCategoryId === item.id ? null : item.id)}
+                                                            className={cn(
+                                                                'p-1 rounded transition-colors',
+                                                                planningCategoryId === item.id
+                                                                    ? 'text-primary-600 bg-primary-50'
+                                                                    : 'text-gray-300 hover:text-primary-600 hover:bg-primary-50'
+                                                            )}
+                                                            title="Plan expenses"
+                                                        >
+                                                            <CalendarPlanIcon className="w-4 h-4" />
+                                                        </button>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                            {/* Inline BudgetPlanEditor */}
+                                            {isChild && planningCategoryId === item.id && (
+                                                <tr>
+                                                    <td colSpan={6}>
+                                                        <BudgetPlanEditor
+                                                            categoryId={item.id}
+                                                            categoryName={item.name}
+                                                            budgetAmount={item.planned || 0}
+                                                            onClose={() => setPlanningCategoryId(null)}
+                                                        />
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </React.Fragment>
                                     );
                                 })}
 
@@ -287,6 +320,7 @@ const BudgetReport = () => {
                                             </span>
                                         </div>
                                     </td>
+                                    <td className="px-6 py-3"></td>
                                 </tr>
                             </tbody>
                         </table>

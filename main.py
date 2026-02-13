@@ -1,5 +1,6 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import List
 from fastapi.middleware.cors import CORSMiddleware
 import models, schemas
@@ -37,8 +38,6 @@ def read_root():
 
 @app.get("/projects/", response_model=List[schemas.Project])
 def read_projects(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    from sqlalchemy import func
-    
     projects = db.query(models.Project).offset(skip).limit(limit).all()
     
     # Calculate total_budget dynamically for each project
@@ -200,6 +199,162 @@ def read_accounts(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)
         print(f"Error fetching accounts: {e}")
         import traceback
         traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- Apartments ---
+
+@app.get("/projects/{project_id}/apartments", response_model=List[schemas.Apartment])
+def read_apartments(project_id: int, db: Session = Depends(get_db)):
+    apartments = db.query(models.Apartment).filter(models.Apartment.project_id == project_id).all()
+    result = []
+    for apt in apartments:
+        total_paid = db.query(func.sum(models.CustomerPayment.amount)).filter(
+            models.CustomerPayment.apartment_id == apt.id
+        ).scalar() or 0
+        sale_price = float(apt.sale_price) if apt.sale_price else None
+        remaining = (sale_price - float(total_paid)) if sale_price is not None else None
+        result.append({
+            "id": apt.id,
+            "project_id": apt.project_id,
+            "name": apt.name,
+            "floor": apt.floor,
+            "apartment_number": apt.apartment_number,
+            "customer_name": apt.customer_name,
+            "customer_key": apt.customer_key,
+            "sale_price": sale_price,
+            "ownership_percent": float(apt.ownership_percent) if apt.ownership_percent else None,
+            "remarks": apt.remarks,
+            "total_paid": float(total_paid),
+            "remaining": remaining,
+        })
+    return result
+
+@app.post("/projects/{project_id}/apartments", response_model=schemas.Apartment)
+def create_apartment(project_id: int, apartment: schemas.ApartmentCreate, db: Session = Depends(get_db)):
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    db_apartment = models.Apartment(project_id=project_id, **apartment.dict())
+    db.add(db_apartment)
+    db.commit()
+    db.refresh(db_apartment)
+    return {**db_apartment.__dict__, "total_paid": 0, "remaining": float(db_apartment.sale_price) if db_apartment.sale_price else None}
+
+@app.put("/apartments/{apartment_id}", response_model=schemas.Apartment)
+def update_apartment(apartment_id: int, apartment: schemas.ApartmentCreate, db: Session = Depends(get_db)):
+    db_apartment = db.query(models.Apartment).filter(models.Apartment.id == apartment_id).first()
+    if not db_apartment:
+        raise HTTPException(status_code=404, detail="Apartment not found")
+    for key, value in apartment.dict().items():
+        setattr(db_apartment, key, value)
+    db.commit()
+    db.refresh(db_apartment)
+    total_paid = db.query(func.sum(models.CustomerPayment.amount)).filter(
+        models.CustomerPayment.apartment_id == apartment_id
+    ).scalar() or 0
+    sale_price = float(db_apartment.sale_price) if db_apartment.sale_price else None
+    remaining = (sale_price - float(total_paid)) if sale_price is not None else None
+    return {**db_apartment.__dict__, "total_paid": float(total_paid), "remaining": remaining}
+
+@app.delete("/apartments/{apartment_id}")
+def delete_apartment(apartment_id: int, db: Session = Depends(get_db)):
+    db_apartment = db.query(models.Apartment).filter(models.Apartment.id == apartment_id).first()
+    if not db_apartment:
+        raise HTTPException(status_code=404, detail="Apartment not found")
+    db.delete(db_apartment)
+    db.commit()
+    return {"message": "Apartment deleted successfully"}
+
+# --- Customer Payments ---
+
+@app.get("/apartments/{apartment_id}/payments", response_model=List[schemas.CustomerPayment])
+def read_payments(apartment_id: int, db: Session = Depends(get_db)):
+    payments = db.query(models.CustomerPayment).filter(
+        models.CustomerPayment.apartment_id == apartment_id
+    ).order_by(models.CustomerPayment.date.desc()).all()
+    return payments
+
+@app.post("/apartments/{apartment_id}/payments", response_model=schemas.CustomerPayment)
+def create_payment(apartment_id: int, payment: schemas.CustomerPaymentCreate, db: Session = Depends(get_db)):
+    apartment = db.query(models.Apartment).filter(models.Apartment.id == apartment_id).first()
+    if not apartment:
+        raise HTTPException(status_code=404, detail="Apartment not found")
+    db_payment = models.CustomerPayment(apartment_id=apartment_id, **payment.dict())
+    db.add(db_payment)
+    db.commit()
+    db.refresh(db_payment)
+    return db_payment
+
+@app.put("/payments/{payment_id}", response_model=schemas.CustomerPayment)
+def update_payment(payment_id: int, payment: schemas.CustomerPaymentCreate, db: Session = Depends(get_db)):
+    db_payment = db.query(models.CustomerPayment).filter(models.CustomerPayment.id == payment_id).first()
+    if not db_payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    for key, value in payment.dict().items():
+        setattr(db_payment, key, value)
+    db.commit()
+    db.refresh(db_payment)
+    return db_payment
+
+@app.delete("/payments/{payment_id}")
+def delete_payment(payment_id: int, db: Session = Depends(get_db)):
+    db_payment = db.query(models.CustomerPayment).filter(models.CustomerPayment.id == payment_id).first()
+    if not db_payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    db.delete(db_payment)
+    db.commit()
+    return {"message": "Payment deleted successfully"}
+
+# --- Budget Plans ---
+
+@app.get("/budget-categories/{category_id}/plans", response_model=List[schemas.BudgetPlan])
+def read_budget_plans(category_id: int, db: Session = Depends(get_db)):
+    plans = db.query(models.BudgetPlan).filter(
+        models.BudgetPlan.budget_category_id == category_id
+    ).order_by(models.BudgetPlan.planned_date).all()
+    return plans
+
+@app.post("/budget-categories/{category_id}/plans", response_model=schemas.BudgetPlan)
+def create_budget_plan(category_id: int, plan: schemas.BudgetPlanCreate, db: Session = Depends(get_db)):
+    category = db.query(models.BudgetCategory).filter(models.BudgetCategory.id == category_id).first()
+    if not category:
+        raise HTTPException(status_code=404, detail="Budget category not found")
+    db_plan = models.BudgetPlan(budget_category_id=category_id, **plan.dict())
+    db.add(db_plan)
+    db.commit()
+    db.refresh(db_plan)
+    return db_plan
+
+@app.put("/budget-plans/{plan_id}", response_model=schemas.BudgetPlan)
+def update_budget_plan(plan_id: int, plan: schemas.BudgetPlanCreate, db: Session = Depends(get_db)):
+    db_plan = db.query(models.BudgetPlan).filter(models.BudgetPlan.id == plan_id).first()
+    if not db_plan:
+        raise HTTPException(status_code=404, detail="Budget plan not found")
+    for key, value in plan.dict().items():
+        setattr(db_plan, key, value)
+    db.commit()
+    db.refresh(db_plan)
+    return db_plan
+
+@app.delete("/budget-plans/{plan_id}")
+def delete_budget_plan(plan_id: int, db: Session = Depends(get_db)):
+    db_plan = db.query(models.BudgetPlan).filter(models.BudgetPlan.id == plan_id).first()
+    if not db_plan:
+        raise HTTPException(status_code=404, detail="Budget plan not found")
+    db.delete(db_plan)
+    db.commit()
+    return {"message": "Budget plan deleted successfully"}
+
+# --- CSV Import ---
+
+@app.post("/import/apartments")
+async def import_apartments(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    from services.apartment_import_service import import_apartments_from_csv
+    try:
+        content = await file.read()
+        result = import_apartments_from_csv(db, content)
+        return result
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

@@ -82,3 +82,44 @@ class CustomerPaymentPlan(Base):
     project_id = Column(Integer, ForeignKey("projects.id"))
 
     project = relationship("Project")
+
+
+class Apartment(Base):
+    __tablename__ = "apartments"
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    name = Column(String(255), nullable=False)
+    floor = Column(String(50), nullable=True)
+    apartment_number = Column(String(50), nullable=True)
+    customer_name = Column(String(255), nullable=True)
+    customer_key = Column(Integer, nullable=True)
+    sale_price = Column(Numeric(18, 2), nullable=True)
+    ownership_percent = Column(Numeric(10, 4), nullable=True)
+    remarks = Column(Text, nullable=True)
+
+    project = relationship("Project", backref="apartments")
+    payments = relationship("CustomerPayment", back_populates="apartment",
+                           cascade="all, delete-orphan")
+
+
+class CustomerPayment(Base):
+    __tablename__ = "customer_payments"
+    id = Column(Integer, primary_key=True, index=True)
+    apartment_id = Column(Integer, ForeignKey("apartments.id"), nullable=False)
+    date = Column(DateTime, nullable=False)
+    amount = Column(Numeric(18, 2), nullable=False)
+    payment_method = Column(String(50), nullable=False, default="Bank Transfer")
+    notes = Column(Text, nullable=True)
+
+    apartment = relationship("Apartment", back_populates="payments")
+
+
+class BudgetPlan(Base):
+    __tablename__ = "budget_plans"
+    id = Column(Integer, primary_key=True, index=True)
+    budget_category_id = Column(Integer, ForeignKey("budget_categories.id"), nullable=False)
+    planned_date = Column(DateTime, nullable=False)
+    amount = Column(Numeric(18, 2), nullable=False)
+    description = Column(Text, nullable=True)
+
+    budget_category = relationship("BudgetCategory", backref="plans")

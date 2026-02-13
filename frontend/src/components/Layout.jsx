@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { DashboardIcon, TransactionsIcon, ProjectsIcon, BudgetIcon, MenuIcon, CloseIcon } from './Icons';
+import { DashboardIcon, TransactionsIcon, ProjectsIcon, ApartmentsIcon, BudgetIcon, MenuIcon, CloseIcon } from './Icons';
 import { cn } from '../lib/utils';
 
 const navigation = [
     { name: 'Dashboard', href: '/', icon: DashboardIcon },
     { name: 'Transactions', href: '/transactions', icon: TransactionsIcon },
     { name: 'Projects', href: '/projects', icon: ProjectsIcon },
+    { name: 'Apartments', href: '/apartments', icon: ApartmentsIcon },
     { name: 'Budget Report', href: '/budget-report', icon: BudgetIcon },
 ];
 

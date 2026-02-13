@@ -97,6 +97,33 @@ def generate_cash_flow_forecast(db: Session, project_id: Optional[int] = None) -
         monthly_data[month_key]["planned_income"] += value
 
     # ---------------------------------------------------------
+    # 2b. Process BudgetPlan entries (Planned Expenses)
+    # ---------------------------------------------------------
+
+    budget_plan_query = db.query(models.BudgetPlan).join(
+        models.BudgetCategory,
+        models.BudgetPlan.budget_category_id == models.BudgetCategory.id
+    )
+    if project_id:
+        budget_plan_query = budget_plan_query.filter(models.BudgetCategory.project_id == project_id)
+    budget_plans = budget_plan_query.all()
+
+    for bp in budget_plans:
+        bp_date = bp.planned_date
+        if not bp_date:
+            continue
+
+        # Rolling logic: if planned_date is in the past, roll to current month
+        if bp_date < current_month_start:
+            effective_date = current_month_start
+        else:
+            effective_date = bp_date
+
+        month_key = effective_date.strftime("%Y-%m")
+        amount = bp.amount if bp.amount else Decimal(0)
+        monthly_data[month_key]["planned_expense"] += amount
+
+    # ---------------------------------------------------------
     # 3. Process Transactions (Actuals)
     # ---------------------------------------------------------
     

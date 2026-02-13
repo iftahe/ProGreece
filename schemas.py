@@ -1,7 +1,8 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 from datetime import date, datetime
 from typing import Optional, List
 from decimal import Decimal
+from enum import Enum
 
 # --- Account Schemas ---
 class AccountType(BaseModel):
@@ -79,5 +80,69 @@ class BudgetCategoryCreate(BudgetCategoryBase):
 class BudgetCategory(BudgetCategoryBase):
     id: int
     project_id: int
+    class Config:
+        from_attributes = True
+
+
+# --- Payment Method Enum ---
+class PaymentMethodEnum(str, Enum):
+    BANK_TRANSFER = "Bank Transfer"
+    TRUST_ACCOUNT = "Trust Account"
+    CASH = "Cash"
+    DIRECT_TO_OWNER = "Direct to Owner"
+
+
+# --- Apartment Schemas ---
+class ApartmentBase(BaseModel):
+    name: str
+    floor: Optional[str] = None
+    apartment_number: Optional[str] = None
+    customer_name: Optional[str] = None
+    customer_key: Optional[int] = None
+    sale_price: Optional[float] = None
+    ownership_percent: Optional[float] = None
+    remarks: Optional[str] = None
+
+class ApartmentCreate(ApartmentBase):
+    pass
+
+class Apartment(ApartmentBase):
+    id: int
+    project_id: int
+    total_paid: Optional[float] = 0
+    remaining: Optional[float] = None
+    class Config:
+        from_attributes = True
+
+
+# --- Customer Payment Schemas ---
+class CustomerPaymentBase(BaseModel):
+    date: datetime
+    amount: float
+    payment_method: PaymentMethodEnum = PaymentMethodEnum.BANK_TRANSFER
+    notes: Optional[str] = None
+
+class CustomerPaymentCreate(CustomerPaymentBase):
+    pass
+
+class CustomerPayment(CustomerPaymentBase):
+    id: int
+    apartment_id: int
+    class Config:
+        from_attributes = True
+
+
+# --- Budget Plan Schemas ---
+class BudgetPlanBase(BaseModel):
+    planned_date: datetime
+    amount: float
+    description: Optional[str] = None
+
+class BudgetPlanCreate(BudgetPlanBase):
+    pass
+
+class BudgetPlan(BudgetPlanBase):
+    id: int
+    budget_category_id: int
     class Config:
         from_attributes = True
