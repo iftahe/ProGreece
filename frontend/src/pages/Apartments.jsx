@@ -233,6 +233,19 @@ const Apartments = () => {
         fileInputRef.current?.click();
     };
 
+    const handleDownloadTemplate = () => {
+        const headers = 'Project,ProjectKey,Floor,Appartment,Price,Percent,Customer,CustomerKey,remarks';
+        const example = 'Athens Luxury,1,4,1,250000,50,John Smith,100,Corner unit';
+        const csv = headers + '\n' + example + '\n';
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'apartments_template.csv';
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
     const handleFileSelected = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -305,9 +318,14 @@ const Apartments = () => {
                         onChange={handleFileSelected}
                         className="hidden"
                     />
-                    <button onClick={handleImport} className="btn-secondary text-sm">
-                        Import CSV
-                    </button>
+                    <div className="flex flex-col items-center gap-1">
+                        <button onClick={handleImport} className="btn-secondary text-sm">
+                            Import CSV
+                        </button>
+                        <button onClick={handleDownloadTemplate} className="text-xs text-slate-400 hover:text-teal-400 underline">
+                            Download template
+                        </button>
+                    </div>
                     <button onClick={handleAddApartment} className="btn-primary text-sm">
                         + New Apartment
                     </button>
