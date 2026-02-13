@@ -1,6 +1,14 @@
 from sqlalchemy import Column, Integer, String, Float, Date, DateTime, ForeignKey, Numeric, Text
 from sqlalchemy.orm import relationship
 from database import Base
+import enum
+
+
+class PaymentMethod(enum.Enum):
+    BANK_TRANSFER = "Bank Transfer"
+    TRUST_ACCOUNT = "Trust Account"
+    CASH = "Cash"
+    DIRECT_TO_OWNER = "Direct to Owner"
 
 class AccountType(Base):
     __tablename__ = "account_types"

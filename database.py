@@ -2,10 +2,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import sqlite3
+import os
 
 # שם קובץ הדאטה-בייס
-DB_NAME = "greece_project.db"
-SQLALCHEMY_DATABASE_URL = f"sqlite:///./{DB_NAME}"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_NAME = os.path.join(BASE_DIR, "greece_project.db")
+SQLALCHEMY_DATABASE_URL = f"sqlite:///{DB_NAME}"
 
 # --- חלק 1: הגדרות עבור main.py (SQLAlchemy) ---
 # זה מה שהשרת צריך כדי לרוץ
