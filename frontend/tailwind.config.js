@@ -6,26 +6,29 @@ export default {
     ],
     theme: {
         extend: {
+            fontFamily: {
+                sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+            },
             colors: {
                 primary: {
-                    50: '#eef2ff',
-                    100: '#e0e7ff',
-                    200: '#c7d2fe',
-                    300: '#a5b4fc',
-                    400: '#818cf8',
-                    500: '#6366f1',
-                    600: '#4f46e5',
-                    700: '#4338ca',
-                    800: '#3730a3',
-                    900: '#312e81',
+                    50: '#eff6ff',
+                    100: '#dbeafe',
+                    200: '#bfdbfe',
+                    300: '#93c5fd',
+                    400: '#60a5fa',
+                    500: '#3b82f6',
+                    600: '#3b5998',
+                    700: '#2d4373',
+                    800: '#1e3a5f',
+                    900: '#1a2744',
                 },
                 sidebar: {
-                    DEFAULT: '#0f172a',
-                    hover: '#1e293b',
-                    active: '#334155',
+                    DEFAULT: '#1a1f36',
+                    hover: '#252b45',
+                    active: '#323a57',
                 },
                 income: '#10b981',
-                expense: '#f43f5e',
+                expense: '#dc2626',
             },
             animation: {
                 'pulse-slow': 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',

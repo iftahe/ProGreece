@@ -1,114 +1,144 @@
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-import pytest
+"""
+Tests for core API endpoints: projects, accounts, transactions, VAT logic.
+"""
+from datetime import datetime
 
-# Application imports
-from main import app, get_db
-import models
 
-# Setup in-memory SQLite for testing
-SQLALCHEMY_DATABASE_URL = "sqlite://"
+# ── Projects ──────────────────────────────────────────────────────────
 
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL,
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Create tables in the test database
-models.Base.metadata.create_all(bind=engine)
-
-def override_get_db():
-    try:
-        db = TestingSessionLocal()
-        yield db
-    finally:
-        db.close()
-
-app.dependency_overrides[get_db] = override_get_db
-
-client = TestClient(app)
-
-def test_create_project():
-    response = client.post(
-        "/projects/",
-        json={"name": "Test Project", "status": "Active", "account_balance": 1000.0}
-    )
-    assert response.status_code == 200, response.text
-    data = response.json()
-    assert data["name"] == "Test Project"
-    assert "id" in data
-
-def test_create_account():
-    response = client.post(
-        "/accounts/",
-        json={"name": "Regular Account", "is_system_account": 0}
-    )
-    assert response.status_code == 200, response.text
-    data = response.json()
-    assert data["name"] == "Regular Account"
-    assert data["is_system_account"] == 0
-
-def test_create_system_account():
-    response = client.post(
-        "/accounts/",
-        json={"name": "System Account", "is_system_account": 1}
-    )
-    assert response.status_code == 200, response.text
-    data = response.json()
-    assert data["name"] == "System Account"
-    assert data["is_system_account"] == 1
-
-def test_transaction_vat_logic_standard():
-    # Setup accounts
-    acc1 = client.post("/accounts/", json={"name": "Acc1", "is_system_account": 0}).json()
-    acc2 = client.post("/accounts/", json={"name": "Acc2", "is_system_account": 0}).json()
-    
-    # Create transaction with VAT
-    response = client.post(
-        "/transactions/",
-        json={
-            "from_account_id": acc1["id"],
-            "to_account_id": acc2["id"],
-            "amount": 100.0,
-            "vat_rate": 0.17
-        }
-    )
+def test_create_project(client):
+    response = client.post("/projects/", json={
+        "name": "Test Project",
+        "status": "Active",
+        "account_balance": 1000.0,
+    })
     assert response.status_code == 200
     data = response.json()
-    # Should keep original VAT because no system account is involved
-    assert float(data["vat_rate"]) == 0.17
+    assert data["name"] == "Test Project"
+    assert data["status"] == "Active"
+    assert "id" in data
 
-def test_transaction_vat_logic_with_system_account():
-    # Setup accounts
-    sys_acc = client.post("/accounts/", json={"name": "SysAcc", "is_system_account": 1}).json()
-    user_acc = client.post("/accounts/", json={"name": "UserAcc", "is_system_account": 0}).json()
-    
-    # Transaction FROM System Account -> VAT should be 0
-    response1 = client.post(
-        "/transactions/",
-        json={
-            "from_account_id": sys_acc["id"],
-            "to_account_id": user_acc["id"],
-            "amount": 100.0,
-            "vat_rate": 0.17
-        }
-    )
-    assert response1.status_code == 200
-    assert float(response1.json()["vat_rate"]) == 0.0
 
-    # Transaction TO System Account -> VAT should be 0
-    response2 = client.post(
-        "/transactions/",
-        json={
-            "from_account_id": user_acc["id"],
-            "to_account_id": sys_acc["id"],
-            "amount": 50.0,
-            "vat_rate": 0.17
-        }
-    )
-    assert response2.status_code == 200
-    assert float(response2.json()["vat_rate"]) == 0.0
+def test_list_projects(client, sample_project):
+    response = client.get("/projects/")
+    assert response.status_code == 200
+    projects = response.json()
+    assert len(projects) >= 1
+    assert any(p["name"] == "Test Project" for p in projects)
+
+
+def test_update_project(client, sample_project):
+    pid = sample_project["id"]
+    response = client.put(f"/projects/{pid}", json={
+        "name": "Updated Project",
+        "status": "Completed",
+    })
+    assert response.status_code == 200
+    data = response.json()
+    assert data["name"] == "Updated Project"
+    assert data["status"] == "Completed"
+
+
+def test_update_project_not_found(client):
+    response = client.put("/projects/99999", json={"name": "Ghost"})
+    assert response.status_code == 404
+
+
+# ── Accounts (GET only — no POST endpoint) ───────────────────────────
+
+
+def test_list_accounts(client, sample_accounts):
+    response = client.get("/accounts/")
+    assert response.status_code == 200
+    accounts = response.json()
+    assert len(accounts) == 2
+    names = {a["name"] for a in accounts}
+    assert "Regular Account" in names
+    assert "System Account" in names
+
+
+def test_list_accounts_empty(client):
+    response = client.get("/accounts/")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+# ── Transactions ──────────────────────────────────────────────────────
+
+
+def test_create_transaction(client, sample_project, sample_accounts):
+    response = client.post("/transactions/", json={
+        "project_id": sample_project["id"],
+        "date": "2025-03-01T00:00:00",
+        "amount": 5000.0,
+        "remarks": "Test expense",
+        "transaction_type": 1,
+        "type": "expense",
+    })
+    assert response.status_code == 200
+    data = response.json()
+    assert float(data["amount"]) == 5000.0
+    assert data["remarks"] == "Test expense"
+
+
+def test_list_transactions(client, sample_project):
+    # Create two transactions
+    for i in range(2):
+        client.post("/transactions/", json={
+            "project_id": sample_project["id"],
+            "date": f"2025-0{i+1}-01T00:00:00",
+            "amount": 100.0 * (i + 1),
+        })
+    response = client.get("/transactions/")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["items"]) == 2
+    assert data["total"] == 2
+
+
+# ── VAT Logic ─────────────────────────────────────────────────────────
+
+
+def test_vat_kept_for_regular_accounts(client, sample_accounts):
+    """VAT should be preserved when both accounts are regular."""
+    regular = sample_accounts["regular"]
+    response = client.post("/transactions/", json={
+        "date": "2025-01-15T00:00:00",
+        "from_account_id": regular.id,
+        "to_account_id": regular.id,
+        "amount": 100.0,
+        "vat_rate": 0.17,
+    })
+    assert response.status_code == 200
+    assert float(response.json()["vat_rate"]) == 0.17
+
+
+def test_vat_zeroed_for_system_from_account(client, sample_accounts):
+    """VAT should be 0 when FROM account is a system account."""
+    system = sample_accounts["system"]
+    regular = sample_accounts["regular"]
+    response = client.post("/transactions/", json={
+        "date": "2025-01-15T00:00:00",
+        "from_account_id": system.id,
+        "to_account_id": regular.id,
+        "amount": 100.0,
+        "vat_rate": 0.17,
+    })
+    assert response.status_code == 200
+    assert float(response.json()["vat_rate"]) == 0.0
+
+
+def test_vat_zeroed_for_system_to_account(client, sample_accounts):
+    """VAT should be 0 when TO account is a system account."""
+    system = sample_accounts["system"]
+    regular = sample_accounts["regular"]
+    response = client.post("/transactions/", json={
+        "date": "2025-01-15T00:00:00",
+        "from_account_id": regular.id,
+        "to_account_id": system.id,
+        "amount": 50.0,
+        "vat_rate": 0.17,
+    })
+    assert response.status_code == 200
+    assert float(response.json()["vat_rate"]) == 0.0

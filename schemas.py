@@ -77,6 +77,10 @@ class BudgetCategoryBase(BaseModel):
 class BudgetCategoryCreate(BudgetCategoryBase):
     project_id: int
 
+class BudgetCategoryUpdate(BaseModel):
+    category_name: Optional[str] = None
+    planned_amount: Optional[float] = None
+
 class BudgetCategory(BudgetCategoryBase):
     id: int
     project_id: int

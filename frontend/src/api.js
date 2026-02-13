@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-// יצירת מופע של axios עם כתובת הבסיס
+// Create an axios instance with the base URL
 const api = axios.create({
     baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000',
 });
@@ -23,7 +23,7 @@ export const getBudgetCategories = async (projectId) => {
 };
 
 export const updateBudgetCategory = async (itemId, amount) => {
-    const response = await api.put(`/budget-categories/${itemId}`, { amount });
+    const response = await api.put(`/budget-categories/${itemId}`, { planned_amount: amount });
     return response.data;
 };
 
@@ -52,10 +52,15 @@ export const getBudgetReport = async (projectId) => {
     return response.data;
 };
 
-// --- התיקון כאן ---
-// שינינו לשימוש ב-api.get במקום fetch כדי לשמור על אחידות וכדי שזה יעבוד עם ה-baseURL
-export const getTransactions = async () => {
-    const response = await api.get('/transactions/');
+export const getTransactions = async ({ skip = 0, limit = 50, project_id = null, date_from = null, date_to = null, search = null, transaction_type = null, tx_type = null } = {}) => {
+    const params = { skip, limit };
+    if (project_id) params.project_id = project_id;
+    if (date_from) params.date_from = date_from;
+    if (date_to) params.date_to = date_to;
+    if (search) params.search = search;
+    if (transaction_type !== null && transaction_type !== undefined) params.transaction_type = transaction_type;
+    if (tx_type) params.tx_type = tx_type;
+    const response = await api.get('/transactions/', { params });
     return response.data;
 };
 
@@ -71,8 +76,8 @@ export const updateTransaction = async (id, data) => {
 
 // --- Apartments ---
 
-export const getApartments = async (projectId) => {
-    const response = await api.get(`/projects/${projectId}/apartments`);
+export const getApartments = async (projectId, { skip = 0, limit = 50 } = {}) => {
+    const response = await api.get(`/projects/${projectId}/apartments`, { params: { skip, limit } });
     return response.data;
 };
 
@@ -132,6 +137,27 @@ export const updateBudgetPlan = async (id, data) => {
 
 export const deleteBudgetPlan = async (id) => {
     const response = await api.delete(`/budget-plans/${id}`);
+    return response.data;
+};
+
+// --- Budget Timeline ---
+
+export const getBudgetTimeline = async (projectId) => {
+    const response = await api.get(`/reports/budget-timeline/${projectId}`);
+    return response.data;
+};
+
+// --- Portfolio Summary ---
+
+export const getPortfolioSummary = async () => {
+    const response = await api.get('/reports/portfolio-summary');
+    return response.data;
+};
+
+// --- Project KPI Summary ---
+
+export const getProjectKpiSummary = async (projectId) => {
+    const response = await api.get(`/projects/${projectId}/kpi-summary`);
     return response.data;
 };
 

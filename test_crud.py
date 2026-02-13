@@ -1,82 +1,61 @@
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-import pytest
-from main import app, get_db
-import models
+"""
+Tests for transaction CRUD lifecycle (Create, Read, Update, Delete).
+"""
 
-# Setup in-memory SQLite for testing
-SQLALCHEMY_DATABASE_URL = "sqlite://"
 
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL,
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+def test_transaction_crud_lifecycle(client, sample_project, sample_accounts):
+    """Full CRUD cycle: create -> update -> delete a transaction."""
+    regular = sample_accounts["regular"]
+    pid = sample_project["id"]
 
-# Create tables in the test database
-models.Base.metadata.create_all(bind=engine)
-
-def override_get_db():
-    try:
-        db = TestingSessionLocal()
-        yield db
-    finally:
-        db.close()
-
-app.dependency_overrides[get_db] = override_get_db
-
-client = TestClient(app)
-
-def test_transaction_crud():
-    # Setup
-    proj = client.post("/projects/", json={"name": "Crud Project"}).json()
-    acc = client.post("/accounts/", json={"name": "Crud Acc", "is_system_account": 0}).json()
-    
     # 1. CREATE
-    create_payload = {
-        "project_id": proj["id"],
-        "from_account_id": acc["id"],
+    res = client.post("/transactions/", json={
+        "project_id": pid,
+        "date": "2025-06-01T00:00:00",
+        "from_account_id": regular.id,
         "amount": 200.0,
         "vat_rate": 0.17,
-        "transaction_type": 2, # Planned
-        "remarks": "Initial Remark"
-    }
-    res_create = client.post("/transactions/", json=create_payload)
-    if res_create.status_code != 200:
-        print(res_create.text)
-    assert res_create.status_code == 200
-    tx = res_create.json()
+        "transaction_type": 2,  # Planned
+        "remarks": "Initial Remark",
+    })
+    assert res.status_code == 200
+    tx = res.json()
     assert tx["transaction_type"] == 2
     assert tx["remarks"] == "Initial Remark"
     tx_id = tx["id"]
 
-    # 2. UPDATE
-    update_payload = {
-        "transaction_type": 1, # Executed
+    # 2. UPDATE — change to Executed, update amount and remarks
+    res = client.put(f"/transactions/{tx_id}", json={
+        "project_id": pid,
+        "date": "2025-06-15T00:00:00",
+        "from_account_id": regular.id,
+        "amount": 250.0,
+        "transaction_type": 1,  # Executed
         "remarks": "Updated Remark",
-        "amount": 250.0
-    }
-    # Note: PUT expects a full or partial schema. main.py uses TransactionCreate which has all fields optional in schema?
-    # No, schemas.TransactionCreate inherits TransactionBase where fields are Optional.
-    # But checking main.py: def update_transaction(... transaction: schemas.TransactionCreate ...)
-    # So we should pass the structure.
-    
-    res_update = client.put(f"/transactions/{tx_id}", json=update_payload)
-    if res_update.status_code != 200:
-        print(res_update.text)
-    assert res_update.status_code == 200
-    updated_tx = res_update.json()
-    assert updated_tx["transaction_type"] == 1
-    assert updated_tx["remarks"] == "Updated Remark"
-    assert float(updated_tx["amount"]) == 250.0
+    })
+    assert res.status_code == 200
+    updated = res.json()
+    assert updated["transaction_type"] == 1
+    assert updated["remarks"] == "Updated Remark"
+    assert float(updated["amount"]) == 250.0
 
     # 3. DELETE
-    res_delete = client.delete(f"/transactions/{tx_id}")
-    assert res_delete.status_code == 200
-    
-    # Verify Gone
-    res_get = client.get(f"/transactions/{tx_id}")
-    assert res_get.status_code == 404
+    res = client.delete(f"/transactions/{tx_id}")
+    assert res.status_code == 200
+
+    # 4. Verify it no longer appears in the list
+    data = client.get("/transactions/").json()
+    assert all(t["id"] != tx_id for t in data["items"])
+
+
+def test_update_transaction_not_found(client):
+    res = client.put("/transactions/99999", json={
+        "date": "2025-01-01T00:00:00",
+        "amount": 100.0,
+    })
+    assert res.status_code == 404
+
+
+def test_delete_transaction_not_found(client):
+    res = client.delete("/transactions/99999")
+    assert res.status_code == 404

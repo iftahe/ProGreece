@@ -3,6 +3,12 @@ import { getProjects, createProject, updateProject } from '../api';
 import { PencilIcon, EmptyStateIcon } from '../components/Icons';
 import { cn, formatEUR } from '../lib/utils';
 
+const STATUS_LABELS = {
+    Active: 'Active',
+    Completed: 'Completed',
+    Archived: 'Archived',
+};
+
 const statusConfig = {
     Active: { dot: 'bg-emerald-500', text: 'text-emerald-700', bg: 'bg-emerald-50' },
     Completed: { dot: 'bg-blue-500', text: 'text-blue-700', bg: 'bg-blue-50' },
@@ -14,7 +20,7 @@ const StatusBadge = ({ status }) => {
     return (
         <span className={cn('inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium', config.bg, config.text)}>
             <span className={cn('w-1.5 h-1.5 rounded-full', config.dot)} />
-            {status}
+            {STATUS_LABELS[status] || status}
         </span>
     );
 };
@@ -138,7 +144,7 @@ const Projects = () => {
                     </h2>
                     {editingId && (
                         <button onClick={resetForm} className="text-sm text-rose-600 hover:text-rose-800 font-medium">
-                            Cancel Edit
+                            {'Cancel Edit'}
                         </button>
                     )}
                 </div>
@@ -154,10 +160,10 @@ const Projects = () => {
 
                 <form onSubmit={handleSubmit} className="space-y-6">
                     <fieldset className="space-y-4">
-                        <legend className="text-sm font-semibold text-gray-700 uppercase tracking-wider">Project Details</legend>
+                        <legend className="text-sm font-semibold text-gray-700 uppercase tracking-wider">{'Project Details'}</legend>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
-                                <label className="block text-sm font-medium text-gray-700">Project Name</label>
+                                <label className="block text-sm font-medium text-gray-700">{'Project Name'}</label>
                                 <input
                                     type="text"
                                     name="name"
@@ -168,7 +174,7 @@ const Projects = () => {
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700">Total Budget</label>
+                                <label className="block text-sm font-medium text-gray-700">{'Total Budget'}</label>
                                 <input
                                     type="number"
                                     step="0.01"
@@ -179,20 +185,20 @@ const Projects = () => {
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700">Status</label>
+                                <label className="block text-sm font-medium text-gray-700">{'Status'}</label>
                                 <select
                                     name="status"
                                     value={formData.status}
                                     onChange={handleChange}
                                     className="input-field"
                                 >
-                                    <option value="Active">Active</option>
-                                    <option value="Completed">Completed</option>
-                                    <option value="Archived">Archived</option>
+                                    <option value="Active">{'Active'}</option>
+                                    <option value="Completed">{'Completed'}</option>
+                                    <option value="Archived">{'Archived'}</option>
                                 </select>
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700">Remarks</label>
+                                <label className="block text-sm font-medium text-gray-700">{'Notes'}</label>
                                 <input
                                     type="text"
                                     name="remarks"
@@ -225,24 +231,24 @@ const Projects = () => {
             {/* Projects Table */}
             <div className="card overflow-hidden">
                 <div className="px-6 py-4 border-b border-gray-100">
-                    <h3 className="text-lg font-semibold text-gray-900">All Projects</h3>
+                    <h3 className="text-lg font-semibold text-gray-900">{'All Projects'}</h3>
                 </div>
 
                 {projects.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-16 px-4">
                         <EmptyStateIcon className="w-16 h-16 text-gray-300 mb-4" />
-                        <p className="text-gray-500 text-sm">No projects yet. Create your first project above.</p>
+                        <p className="text-gray-500 text-sm">{'No projects yet. Create your first project above.'}</p>
                     </div>
                 ) : (
                     <div className="overflow-x-auto">
                         <table className="min-w-full divide-y divide-gray-200">
                             <thead className="bg-slate-50">
                                 <tr>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Total Budget</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Remarks</th>
-                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{'Name'}</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{'Status'}</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">{'Total Budget'}</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{'Notes'}</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">{'Actions'}</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100 text-sm">
@@ -260,7 +266,7 @@ const Projects = () => {
                                             <button
                                                 onClick={() => handleEdit(p)}
                                                 className="inline-flex items-center p-1.5 rounded-lg text-gray-400 hover:text-primary-600 hover:bg-primary-50 transition-colors"
-                                                title="Edit project"
+                                                title={'Edit Project'}
                                             >
                                                 <PencilIcon className="w-4 h-4" />
                                             </button>

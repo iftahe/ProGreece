@@ -5,3 +5,5 @@ pydantic
 gunicorn
 psycopg2-binary
 python-multipart
+pytest
+httpx
