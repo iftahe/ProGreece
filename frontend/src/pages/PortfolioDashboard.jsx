@@ -103,6 +103,16 @@ const PortfolioDashboard = () => {
 
     // Collect alerts
     const alerts = [];
+
+    // Feature 4: Buffer alerts
+    (data.buffer_alerts || []).forEach(ba => {
+        alerts.push({
+            type: 'danger',
+            text: `Cash below buffer - ${ba.project_name}`,
+            detail: `${ba.month}: Balance ${formatEUR(ba.balance)} (shortfall ${formatEUR(ba.shortfall)})`,
+        });
+    });
+
     projects.forEach(proj => {
         if (proj.worst_category) {
             alerts.push({

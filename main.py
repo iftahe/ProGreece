@@ -4,6 +4,7 @@ from sqlalchemy import func, or_
 from typing import List, Optional
 from datetime import datetime
 from fastapi.middleware.cors import CORSMiddleware
+import json
 import models, schemas
 import services.budget_report_service
 import services.forecast_service
@@ -148,13 +149,17 @@ def create_transaction(transaction: schemas.TransactionCreate, db: Session = Dep
         to_acc = db.query(models.Account).filter(models.Account.id == transaction.to_account_id).first()
         if to_acc and to_acc.is_system_account:
             vat_rate = 0
-    
+
     transaction_data = transaction.dict()
     transaction_data['vat_rate'] = vat_rate
     db_transaction = models.Transaction(**transaction_data)
     db.add(db_transaction)
     db.commit()
     db.refresh(db_transaction)
+
+    # Feature 3: Upsert AccountCategoryMapping
+    _upsert_account_category_mapping(db, db_transaction)
+
     return db_transaction
 
 @app.put("/transactions/{transaction_id}", response_model=schemas.Transaction)
@@ -162,7 +167,7 @@ def update_transaction(transaction_id: int, transaction: schemas.TransactionCrea
     db_transaction = db.query(models.Transaction).filter(models.Transaction.id == transaction_id).first()
     if not db_transaction:
         raise HTTPException(status_code=404, detail="Transaction not found")
-    
+
     # Handle VAT logic
     vat_rate = transaction.vat_rate or 0
     if transaction.from_account_id:
@@ -173,15 +178,19 @@ def update_transaction(transaction_id: int, transaction: schemas.TransactionCrea
         to_acc = db.query(models.Account).filter(models.Account.id == transaction.to_account_id).first()
         if to_acc and to_acc.is_system_account:
             vat_rate = 0
-    
+
     transaction_data = transaction.dict()
     transaction_data['vat_rate'] = vat_rate
-    
+
     for key, value in transaction_data.items():
         setattr(db_transaction, key, value)
-    
+
     db.commit()
     db.refresh(db_transaction)
+
+    # Feature 3: Upsert AccountCategoryMapping
+    _upsert_account_category_mapping(db, db_transaction)
+
     return db_transaction
 
 @app.delete("/transactions/{transaction_id}")
@@ -521,6 +530,34 @@ def get_portfolio_summary(db: Session = Depends(get_db)):
     overall_collection = (total_collected_all / total_revenue_all * 100) if total_revenue_all > 0 else 0
     overall_budget_progress = (total_spent_all / total_budget_all * 100) if total_budget_all > 0 else 0
 
+    # Feature 4: Buffer alerts
+    buffer_alerts = []
+    for proj_summary in project_summaries:
+        setting = db.query(models.ProjectSetting).filter(
+            models.ProjectSetting.project_id == proj_summary["id"]
+        ).first()
+        buffer_amount = float(setting.cash_buffer_amount) if setting else 200000
+
+        proj_buffer_alerts = []
+        for row in (proj_summary.get("cash_flow") or []):
+            cum_balance = row.get("cumulative_balance", 0)
+            if cum_balance < buffer_amount:
+                shortfall = buffer_amount - cum_balance
+                proj_buffer_alerts.append({
+                    "month": row["date"],
+                    "balance": round(cum_balance, 2),
+                    "buffer": round(buffer_amount, 2),
+                    "shortfall": round(shortfall, 2),
+                })
+
+        proj_summary["buffer_alerts"] = proj_buffer_alerts
+        for alert in proj_buffer_alerts:
+            buffer_alerts.append({
+                "project_id": proj_summary["id"],
+                "project_name": proj_summary["name"],
+                **alert,
+            })
+
     return {
         "projects": project_summaries,
         "totals": {
@@ -531,7 +568,8 @@ def get_portfolio_summary(db: Session = Depends(get_db)):
             "total_revenue": round(total_revenue_all, 2),
             "total_collected": round(total_collected_all, 2),
             "collection_rate": round(overall_collection, 1),
-        }
+        },
+        "buffer_alerts": buffer_alerts,
     }
 
 # --- Project KPI Summary ---
@@ -757,6 +795,190 @@ async def import_apartments(file: UploadFile = File(...), db: Session = Depends(
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# --- Feature 4: Project Settings (Cash Buffer) ---
+
+@app.get("/projects/{project_id}/settings")
+def get_project_settings(project_id: int, db: Session = Depends(get_db)):
+    setting = db.query(models.ProjectSetting).filter(
+        models.ProjectSetting.project_id == project_id
+    ).first()
+    if not setting:
+        return {"project_id": project_id, "cash_buffer_amount": 200000}
+    return {
+        "id": setting.id,
+        "project_id": setting.project_id,
+        "cash_buffer_amount": float(setting.cash_buffer_amount) if setting.cash_buffer_amount else 200000,
+    }
+
+@app.put("/projects/{project_id}/settings")
+def update_project_settings(project_id: int, settings: schemas.ProjectSettingCreate, db: Session = Depends(get_db)):
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    existing = db.query(models.ProjectSetting).filter(
+        models.ProjectSetting.project_id == project_id
+    ).first()
+    if existing:
+        existing.cash_buffer_amount = settings.cash_buffer_amount
+    else:
+        existing = models.ProjectSetting(
+            project_id=project_id,
+            cash_buffer_amount=settings.cash_buffer_amount
+        )
+        db.add(existing)
+    db.commit()
+    db.refresh(existing)
+    return {
+        "id": existing.id,
+        "project_id": existing.project_id,
+        "cash_buffer_amount": float(existing.cash_buffer_amount) if existing.cash_buffer_amount else 200000,
+    }
+
+# --- Feature 3: Suggested Category ---
+
+def _upsert_account_category_mapping(db: Session, tx):
+    """Upsert AccountCategoryMapping when transaction has both to_account_id and budget_item_id."""
+    if tx.to_account_id and tx.budget_item_id:
+        existing = db.query(models.AccountCategoryMapping).filter(
+            models.AccountCategoryMapping.account_id == tx.to_account_id,
+            models.AccountCategoryMapping.budget_category_id == tx.budget_item_id,
+        ).first()
+        if existing:
+            existing.last_used = datetime.now()
+        else:
+            mapping = models.AccountCategoryMapping(
+                account_id=tx.to_account_id,
+                budget_category_id=tx.budget_item_id,
+                last_used=datetime.now(),
+            )
+            db.add(mapping)
+        db.commit()
+
+@app.get("/accounts/{account_id}/suggested-category")
+def get_suggested_category(account_id: int, db: Session = Depends(get_db)):
+    mapping = db.query(models.AccountCategoryMapping).filter(
+        models.AccountCategoryMapping.account_id == account_id
+    ).order_by(models.AccountCategoryMapping.last_used.desc()).first()
+    if not mapping:
+        return {"budget_category_id": None}
+    return {"budget_category_id": mapping.budget_category_id}
+
+# --- Feature 1: Apartment Search ---
+
+@app.get("/apartments/search")
+def search_apartments(
+    q: str = Query("", min_length=0),
+    project_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+):
+    if len(q) < 2:
+        return []
+    query = db.query(models.Apartment).filter(
+        models.Apartment.customer_name.ilike(f"%{q}%")
+    )
+    if project_id:
+        query = query.filter(models.Apartment.project_id == project_id)
+    results = query.limit(10).all()
+    return [
+        {
+            "id": apt.id,
+            "name": apt.name,
+            "customer_name": apt.customer_name,
+            "project_id": apt.project_id,
+        }
+        for apt in results
+    ]
+
+# --- Feature 5: Direct to Owner Payment ---
+
+@app.post("/apartments/{apartment_id}/payments/direct-to-owner")
+def create_direct_to_owner_payment(
+    apartment_id: int,
+    payment: schemas.CustomerPaymentCreate,
+    db: Session = Depends(get_db),
+):
+    apartment = db.query(models.Apartment).filter(models.Apartment.id == apartment_id).first()
+    if not apartment:
+        raise HTTPException(status_code=404, detail="Apartment not found")
+
+    # Find Direct Account and Owner Account
+    direct_account = db.query(models.Account).filter(
+        models.Account.name.ilike("%direct%"),
+        models.Account.is_system_account == 1,
+    ).first()
+    owner_account = db.query(models.Account).filter(
+        models.Account.name.ilike("%owner%"),
+    ).first()
+
+    if not direct_account:
+        raise HTTPException(status_code=400, detail="Direct Account not found. Please create a system account with 'Direct' in the name.")
+    if not owner_account:
+        raise HTTPException(status_code=400, detail="Owner Account not found. Please create an account with 'Owner' in the name.")
+
+    customer_name = apartment.customer_name or "Unknown"
+
+    # Create CustomerPayment record
+    db_payment = models.CustomerPayment(
+        apartment_id=apartment_id,
+        date=payment.date,
+        amount=payment.amount,
+        payment_method="Direct to Owner",
+        notes=payment.notes,
+    )
+    db.add(db_payment)
+    db.commit()
+    db.refresh(db_payment)
+
+    # TX1: Income to Direct Account
+    tx1 = models.Transaction(
+        project_id=apartment.project_id,
+        date=payment.date,
+        amount=payment.amount,
+        to_account_id=direct_account.id,
+        remarks=f"Direct to Owner - {customer_name} - IN",
+        transaction_type=1,
+        type="income",
+        apartment_id=apartment_id,
+    )
+    db.add(tx1)
+    db.commit()
+    db.refresh(tx1)
+
+    # TX2: Expense from Direct Account to Owner Account
+    tx2 = models.Transaction(
+        project_id=apartment.project_id,
+        date=payment.date,
+        amount=payment.amount,
+        from_account_id=direct_account.id,
+        to_account_id=owner_account.id,
+        remarks=f"Direct to Owner - {customer_name} - OUT",
+        transaction_type=1,
+        type="expense",
+        apartment_id=apartment_id,
+    )
+    db.add(tx2)
+    db.commit()
+    db.refresh(tx2)
+
+    # Store linked transaction IDs
+    db_payment.linked_transaction_ids = json.dumps([tx1.id, tx2.id])
+    db.commit()
+    db.refresh(db_payment)
+
+    return {
+        "payment": {
+            "id": db_payment.id,
+            "apartment_id": db_payment.apartment_id,
+            "date": db_payment.date.isoformat() if db_payment.date else None,
+            "amount": float(db_payment.amount),
+            "payment_method": db_payment.payment_method,
+            "notes": db_payment.notes,
+            "linked_transaction_ids": db_payment.linked_transaction_ids,
+        },
+        "transactions_created": 2,
+    }
+
 
 if __name__ == "__main__":
     import uvicorn

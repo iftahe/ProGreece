@@ -59,42 +59,42 @@ def generate_cash_flow_forecast(db: Session, project_id: Optional[int] = None) -
     current_date = datetime.now()
     current_month_start = datetime(current_date.year, current_date.month, 1)
     
-    # We need to check if a plan is fulfilled.
-    # Assumption: A plan is fulfilled if there is a transaction with the same phase_id.
-    # We will build a set of fulfilled phase_ids from transactions.
-    fulfilled_phase_ids = set()
+    # Partial reconciliation: map phase_id -> total actual income amount
+    actual_by_phase = defaultdict(Decimal)
     for tx in transactions:
-        if tx.phase_id:
-            fulfilled_phase_ids.add(tx.phase_id)
-            
+        if tx.phase_id and tx.type and tx.type.strip().lower() == 'income':
+            amount = tx.amount if tx.amount else Decimal(0)
+            actual_by_phase[tx.phase_id] += amount
+
     monthly_data = defaultdict(lambda: {"actual_income": Decimal(0), "actual_expense": Decimal(0), "planned_income": Decimal(0), "planned_expense": Decimal(0)})
 
-    # Process Plans
+    # Process Plans with partial reconciliation
     for plan in plans:
-        # Check if fulfilled
-        if plan.phase_id in fulfilled_phase_ids:
-            continue # Already happened, so it's in "Actuals" (Transactions)
-            
+        plan_value = plan.value if plan.value else Decimal(0)
+        if plan_value <= 0:
+            continue
+
+        # Check partial fulfillment: if actual >= planned, skip entirely
+        actual_for_phase = actual_by_phase.get(plan.phase_id, Decimal(0))
+        if actual_for_phase >= plan_value:
+            continue  # Fully covered by actuals
+
+        # Remainder = planned - actual (show only what's still expected)
+        remainder = plan_value - actual_for_phase
+
         # Determine Date
         plan_date = plan.manual_date if plan.manual_date else None
-        # Fallback if manual_date is missing? Assuming manual_date is the key date.
         if not plan_date:
             continue
-            
+
         # Rolling Logic
-        # If plan is in the past, move to current month
         if plan_date < current_month_start:
             effective_date = current_month_start
         else:
             effective_date = plan_date
-            
-        # Aggregate
+
         month_key = effective_date.strftime("%Y-%m")
-        
-        # Payment Plans are typically Income (Customer Payments)
-        # We assume positive value for Income.
-        value = plan.value if plan.value else Decimal(0)
-        monthly_data[month_key]["planned_income"] += value
+        monthly_data[month_key]["planned_income"] += remainder
 
     # ---------------------------------------------------------
     # 2b. Process BudgetPlan entries (Planned Expenses)
@@ -107,6 +107,19 @@ def generate_cash_flow_forecast(db: Session, project_id: Optional[int] = None) -
     if project_id:
         budget_plan_query = budget_plan_query.filter(models.BudgetCategory.project_id == project_id)
     budget_plans = budget_plan_query.all()
+
+    # Compute actual spending per budget_category_id for proportional scaling
+    actual_by_budget_cat = defaultdict(Decimal)
+    for tx in transactions:
+        if tx.budget_item_id and tx.transaction_type == 1:
+            amt = tx.amount if tx.amount else Decimal(0)
+            actual_by_budget_cat[tx.budget_item_id] += amt
+
+    # Compute total planned per budget_category_id
+    planned_by_budget_cat = defaultdict(Decimal)
+    for bp in budget_plans:
+        amt = bp.amount if bp.amount else Decimal(0)
+        planned_by_budget_cat[bp.budget_category_id] += amt
 
     for bp in budget_plans:
         bp_date = bp.planned_date
@@ -121,6 +134,16 @@ def generate_cash_flow_forecast(db: Session, project_id: Optional[int] = None) -
 
         month_key = effective_date.strftime("%Y-%m")
         amount = bp.amount if bp.amount else Decimal(0)
+
+        # Proportional scaling: reduce planned by actual spending ratio
+        cat_id = bp.budget_category_id
+        total_planned_cat = planned_by_budget_cat.get(cat_id, Decimal(0))
+        total_actual_cat = actual_by_budget_cat.get(cat_id, Decimal(0))
+
+        if total_planned_cat > 0 and total_actual_cat > 0:
+            remaining_ratio = max(Decimal(0), (total_planned_cat - total_actual_cat) / total_planned_cat)
+            amount = amount * remaining_ratio
+
         monthly_data[month_key]["planned_expense"] += amount
 
     # ---------------------------------------------------------

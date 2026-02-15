@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getProjects, createProject, updateProject } from '../api';
+import { getProjects, createProject, updateProject, getProjectSettings, updateProjectSettings } from '../api';
 import { PencilIcon, EmptyStateIcon } from '../components/Icons';
 import { cn, formatEUR } from '../lib/utils';
 
@@ -65,10 +65,43 @@ const Projects = () => {
         remarks: ''
     };
     const [formData, setFormData] = useState(initialFormState);
+    const [bufferValues, setBufferValues] = useState({}); // { projectId: amount }
 
     useEffect(() => {
         loadProjects();
     }, []);
+
+    // Load buffer settings for all projects
+    useEffect(() => {
+        const loadBuffers = async () => {
+            const buffers = {};
+            for (const p of projects) {
+                try {
+                    const settings = await getProjectSettings(p.id);
+                    buffers[p.id] = settings.cash_buffer_amount;
+                } catch {
+                    buffers[p.id] = 200000;
+                }
+            }
+            setBufferValues(buffers);
+        };
+        if (projects.length > 0) loadBuffers();
+    }, [projects]);
+
+    const handleBufferChange = (projectId, value) => {
+        setBufferValues(prev => ({ ...prev, [projectId]: value }));
+    };
+
+    const handleBufferSave = async (projectId) => {
+        try {
+            await updateProjectSettings(projectId, {
+                cash_buffer_amount: parseFloat(bufferValues[projectId]) || 200000,
+            });
+            setMessage({ type: 'success', text: 'Cash buffer updated' });
+        } catch {
+            setMessage({ type: 'error', text: 'Failed to update buffer' });
+        }
+    };
 
     const loadProjects = async () => {
         try {
@@ -248,6 +281,7 @@ const Projects = () => {
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{'Status'}</th>
                                     <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">{'Total Budget'}</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{'Notes'}</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">{'Cash Buffer'}</th>
                                     <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">{'Actions'}</th>
                                 </tr>
                             </thead>
@@ -262,6 +296,19 @@ const Projects = () => {
                                             {p.total_budget ? formatEUR(p.total_budget) : '-'}
                                         </td>
                                         <td className="px-6 py-4 text-gray-500 max-w-xs truncate">{p.remarks}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-right">
+                                            <div className="flex items-center gap-1 justify-end">
+                                                <input
+                                                    type="number"
+                                                    step="1000"
+                                                    className="input-field !mt-0 w-28 text-sm text-right"
+                                                    value={bufferValues[p.id] ?? ''}
+                                                    onChange={e => handleBufferChange(p.id, e.target.value)}
+                                                    onBlur={() => handleBufferSave(p.id)}
+                                                    title="Cash buffer amount"
+                                                />
+                                            </div>
+                                        </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-right">
                                             <button
                                                 onClick={() => handleEdit(p)}

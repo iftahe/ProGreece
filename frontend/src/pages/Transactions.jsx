@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { getAccounts, createTransaction, getTransactions, deleteTransaction, updateTransaction, getBudgetCategories } from "../api";
+import { getAccounts, createTransaction, getTransactions, deleteTransaction, updateTransaction, getBudgetCategories, getSuggestedCategory, searchApartments } from "../api";
 import { useProject } from '../contexts/ProjectContext';
 import { PencilIcon, TrashIcon, EmptyStateIcon, SearchIcon } from '../components/Icons';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -40,6 +40,11 @@ const Transactions = () => {
     const [statusFilter, setStatusFilter] = useState('all');
     const searchTimeout = useRef(null);
 
+    // Feature 1: Apartment suggestion state
+    const [apartmentSuggestions, setApartmentSuggestions] = useState([]);
+    const [selectedApartmentLink, setSelectedApartmentLink] = useState(null);
+    const apartmentSearchTimeout = useRef(null);
+
     const initialFormState = {
         date: new Date().toISOString().split('T')[0],
         amount: '',
@@ -49,7 +54,8 @@ const Transactions = () => {
         from_account_id: '',
         to_account_id: '',
         vat_rate: '0',
-        status: 'Executed'
+        status: 'Executed',
+        apartment_id: '',
     };
 
     const [formData, setFormData] = useState(initialFormState);
@@ -93,6 +99,46 @@ const Transactions = () => {
         };
         loadBudgetCategories();
     }, [formData.project_id]);
+
+    // Feature 3: Auto-fill budget category when to_account changes
+    useEffect(() => {
+        const suggestCategory = async () => {
+            if (formData.to_account_id && !formData.budget_item_id && formData.project_id) {
+                try {
+                    const result = await getSuggestedCategory(formData.to_account_id);
+                    if (result.budget_category_id) {
+                        // Only auto-fill if the suggested category exists in current project's categories
+                        const match = budgetCategories.find(c => c.id === result.budget_category_id);
+                        if (match) {
+                            setFormData(prev => ({ ...prev, budget_item_id: result.budget_category_id }));
+                        }
+                    }
+                } catch (error) {
+                    // Silently ignore suggestion failures
+                }
+            }
+        };
+        suggestCategory();
+    }, [formData.to_account_id]);
+
+    // Feature 1: Apartment search on description change
+    useEffect(() => {
+        if (apartmentSearchTimeout.current) clearTimeout(apartmentSearchTimeout.current);
+        const desc = formData.description || '';
+        if (desc.length >= 3 && formData.project_id) {
+            apartmentSearchTimeout.current = setTimeout(async () => {
+                try {
+                    const results = await searchApartments(desc, formData.project_id);
+                    setApartmentSuggestions(results);
+                } catch (error) {
+                    setApartmentSuggestions([]);
+                }
+            }, 300);
+        } else {
+            setApartmentSuggestions([]);
+        }
+        return () => clearTimeout(apartmentSearchTimeout.current);
+    }, [formData.description, formData.project_id]);
 
     const loadData = async () => {
         try {
@@ -141,6 +187,7 @@ const Transactions = () => {
                 budget_item_id: formData.budget_item_id ? parseInt(formData.budget_item_id) : null,
                 from_account_id: formData.from_account_id ? parseInt(formData.from_account_id) : null,
                 to_account_id: formData.to_account_id ? parseInt(formData.to_account_id) : null,
+                apartment_id: formData.apartment_id ? parseInt(formData.apartment_id) : null,
                 remarks: formData.description,
                 transaction_type: formData.status === 'Executed' ? 1 : 2
             };
@@ -189,14 +236,23 @@ const Transactions = () => {
             from_account_id: transaction.from_account_id || '',
             to_account_id: transaction.to_account_id || '',
             vat_rate: transaction.vat_rate || 0,
-            status: transaction.transaction_type === 1 ? 'Executed' : 'Planned'
+            status: transaction.transaction_type === 1 ? 'Executed' : 'Planned',
+            apartment_id: transaction.apartment_id || '',
         });
+        if (transaction.apartment_id) {
+            setSelectedApartmentLink({ id: transaction.apartment_id });
+        } else {
+            setSelectedApartmentLink(null);
+        }
+        setApartmentSuggestions([]);
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
     const resetForm = () => {
         setEditingId(null);
         setFormData({ ...initialFormState, project_id: selectedProjectId || '' });
+        setSelectedApartmentLink(null);
+        setApartmentSuggestions([]);
     };
 
     const cleanField = (val) => {
@@ -279,9 +335,44 @@ const Transactions = () => {
                                 <label className="block text-sm font-medium text-gray-700">{'Amount'}</label>
                                 <input type="number" step="0.01" name="amount" value={formData.amount} onChange={handleChange} required className="input-field" />
                             </div>
-                            <div className="md:col-span-2">
+                            <div className="md:col-span-2 relative">
                                 <label className="block text-sm font-medium text-gray-700">{'Description'}</label>
                                 <input type="text" name="description" value={formData.description} onChange={handleChange} className="input-field" />
+                                {/* Feature 1: Apartment suggestions dropdown */}
+                                {apartmentSuggestions.length > 0 && !selectedApartmentLink && (
+                                    <div className="absolute z-10 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                                        {apartmentSuggestions.map(apt => (
+                                            <button
+                                                key={apt.id}
+                                                type="button"
+                                                className="w-full px-4 py-2 text-left text-sm hover:bg-primary-50 flex justify-between items-center"
+                                                onClick={() => {
+                                                    setFormData(prev => ({ ...prev, apartment_id: apt.id }));
+                                                    setSelectedApartmentLink(apt);
+                                                    setApartmentSuggestions([]);
+                                                }}
+                                            >
+                                                <span className="font-medium text-gray-900">{apt.customer_name}</span>
+                                                <span className="text-xs text-gray-400">{apt.name}</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                                {selectedApartmentLink && (
+                                    <span className="inline-flex items-center gap-1 mt-1 px-2.5 py-1 bg-primary-50 text-primary-700 text-xs font-medium rounded-full">
+                                        Linked: {selectedApartmentLink.customer_name || `Apt #${selectedApartmentLink.id}`}
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setSelectedApartmentLink(null);
+                                                setFormData(prev => ({ ...prev, apartment_id: '' }));
+                                            }}
+                                            className="ml-1 text-primary-500 hover:text-primary-800"
+                                        >
+                                            &times;
+                                        </button>
+                                    </span>
+                                )}
                             </div>
                         </div>
                     </fieldset>

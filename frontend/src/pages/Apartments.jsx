@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
     getApartments, createApartment, updateApartment, deleteApartment,
-    getPayments, createPayment, updatePayment, deletePayment, importApartments
+    getPayments, createPayment, updatePayment, deletePayment, importApartments,
+    createDirectToOwnerPayment
 } from '../api';
 import { useProject } from '../contexts/ProjectContext';
 import { ApartmentsIcon, PencilIcon, TrashIcon, XIcon, EmptyStateIcon, GridViewIcon, ListViewIcon, SearchIcon } from '../components/Icons';
@@ -328,6 +329,10 @@ const Apartments = () => {
             if (editingPaymentId) {
                 await updatePayment(editingPaymentId, data);
                 setMessage({ type: 'success', text: 'Payment updated' });
+            } else if (paymentFormData.payment_method === 'Direct to Owner') {
+                // Feature 5: Direct to Owner creates payment + 2 transactions
+                await createDirectToOwnerPayment(selectedApartment.id, data);
+                setMessage({ type: 'success', text: 'Direct to Owner payment added (2 transactions created)' });
             } else {
                 await createPayment(selectedApartment.id, data);
                 setMessage({ type: 'success', text: 'Payment added' });
@@ -336,7 +341,7 @@ const Apartments = () => {
             await loadPayments(selectedApartment.id);
             await loadApartments();
         } catch (error) {
-            setMessage({ type: 'error', text: 'Failed to save payment' });
+            setMessage({ type: 'error', text: error.response?.data?.detail || 'Failed to save payment' });
         }
     };
 
@@ -550,7 +555,14 @@ const Apartments = () => {
                             <tr key={p.id} className="hover:bg-gray-50">
                                 <td className="px-4 py-2">{new Date(p.date).toLocaleDateString('en-GB')}</td>
                                 <td className="px-4 py-2 text-right amount">{formatEURDecimal(p.amount)}</td>
-                                <td className="px-4 py-2">{p.payment_method}</td>
+                                <td className="px-4 py-2">
+                                    {p.payment_method}
+                                    {p.linked_transaction_ids && (
+                                        <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-50 text-indigo-600">
+                                            Linked
+                                        </span>
+                                    )}
+                                </td>
                                 <td className="px-4 py-2 text-gray-500">{p.notes || '-'}</td>
                                 <td className="px-4 py-2">
                                     <div className="flex items-center gap-1 justify-center">

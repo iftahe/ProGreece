@@ -52,6 +52,7 @@ class Transaction(Base):
     cust_invoice = Column(String(255))
     cust_id = Column(Integer)
     budget_item_id = Column(Integer, ForeignKey("budget_categories.id"))
+    apartment_id = Column(Integer, ForeignKey("apartments.id"), nullable=True)
     # Legacy fields (kept for compatibility)
     category = Column(Text)
     description = Column(Text)
@@ -61,6 +62,7 @@ class Transaction(Base):
     project = relationship("Project")
     from_account = relationship("Account", foreign_keys=[from_account_id])
     to_account = relationship("Account", foreign_keys=[to_account_id])
+    apartment = relationship("Apartment")
 
 class BudgetCategory(Base):
     __tablename__ = "budget_categories"
@@ -110,6 +112,7 @@ class CustomerPayment(Base):
     amount = Column(Numeric(18, 2), nullable=False)
     payment_method = Column(String(50), nullable=False, default="Bank Transfer")
     notes = Column(Text, nullable=True)
+    linked_transaction_ids = Column(Text, nullable=True)
 
     apartment = relationship("Apartment", back_populates="payments")
 
@@ -123,3 +126,23 @@ class BudgetPlan(Base):
     description = Column(Text, nullable=True)
 
     budget_category = relationship("BudgetCategory", backref="plans")
+
+
+class ProjectSetting(Base):
+    __tablename__ = "project_settings"
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), unique=True, nullable=False)
+    cash_buffer_amount = Column(Numeric(18, 2), default=200000)
+
+    project = relationship("Project")
+
+
+class AccountCategoryMapping(Base):
+    __tablename__ = "account_category_mappings"
+    id = Column(Integer, primary_key=True, index=True)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
+    budget_category_id = Column(Integer, ForeignKey("budget_categories.id"), nullable=False)
+    last_used = Column(DateTime, nullable=True)
+
+    account = relationship("Account")
+    budget_category = relationship("BudgetCategory")

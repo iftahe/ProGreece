@@ -55,6 +55,7 @@ class TransactionBase(BaseModel):
     cust_invoice: Optional[str] = None
     cust_id: Optional[int] = None
     budget_item_id: Optional[int] = None
+    apartment_id: Optional[int] = None
     # Legacy fields
     category: Optional[str] = None
     description: Optional[str] = None
@@ -132,6 +133,7 @@ class CustomerPaymentCreate(CustomerPaymentBase):
 class CustomerPayment(CustomerPaymentBase):
     id: int
     apartment_id: int
+    linked_transaction_ids: Optional[str] = None
     class Config:
         from_attributes = True
 
@@ -148,5 +150,31 @@ class BudgetPlanCreate(BudgetPlanBase):
 class BudgetPlan(BudgetPlanBase):
     id: int
     budget_category_id: int
+    class Config:
+        from_attributes = True
+
+
+# --- Project Setting Schemas ---
+class ProjectSettingBase(BaseModel):
+    cash_buffer_amount: Optional[float] = 200000
+
+class ProjectSettingCreate(ProjectSettingBase):
+    pass
+
+class ProjectSetting(ProjectSettingBase):
+    id: int
+    project_id: int
+    class Config:
+        from_attributes = True
+
+
+# --- Account Category Mapping Schemas ---
+class AccountCategoryMappingBase(BaseModel):
+    account_id: int
+    budget_category_id: int
+
+class AccountCategoryMapping(AccountCategoryMappingBase):
+    id: int
+    last_used: Optional[datetime] = None
     class Config:
         from_attributes = True

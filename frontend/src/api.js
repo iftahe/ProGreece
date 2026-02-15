@@ -170,4 +170,39 @@ export const importApartments = async (file) => {
     return response.data;
 };
 
+// --- Feature 4: Project Settings ---
+
+export const getProjectSettings = async (projectId) => {
+    const response = await api.get(`/projects/${projectId}/settings`);
+    return response.data;
+};
+
+export const updateProjectSettings = async (projectId, data) => {
+    const response = await api.put(`/projects/${projectId}/settings`, data);
+    return response.data;
+};
+
+// --- Feature 3: Suggested Category ---
+
+export const getSuggestedCategory = async (accountId) => {
+    const response = await api.get(`/accounts/${accountId}/suggested-category`);
+    return response.data;
+};
+
+// --- Feature 1: Apartment Search ---
+
+export const searchApartments = async (query, projectId) => {
+    const params = { q: query };
+    if (projectId) params.project_id = projectId;
+    const response = await api.get('/apartments/search', { params });
+    return response.data;
+};
+
+// --- Feature 5: Direct to Owner ---
+
+export const createDirectToOwnerPayment = async (apartmentId, data) => {
+    const response = await api.post(`/apartments/${apartmentId}/payments/direct-to-owner`, data);
+    return response.data;
+};
+
 export default api;
