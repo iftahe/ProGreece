@@ -3,23 +3,39 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import sqlite3
 import os
+import logging
 
-# בדיקה האם אנחנו רצים ב-Render
+logger = logging.getLogger(__name__)
+
+# Check if running on Render
 IS_RENDER = os.environ.get("RENDER")
 
 if IS_RENDER:
-    # נתיב קבוע שתואם בדיוק ל-Mount Path שהגדרת ב-Render
-    # חשוב: זה חייב להיות הנתיב המלא מהצילום מסך
-    DB_NAME = "/opt/render/project/src/data/greece_project.db"
+    # Fixed path matching the Render persistent disk mount
+    RENDER_DATA_DIR = "/opt/render/project/src/data"
+    DB_NAME = os.path.join(RENDER_DATA_DIR, "greece_project.db")
+
+    # Ensure the data directory exists BEFORE engine creation
+    if not os.path.exists(RENDER_DATA_DIR):
+        try:
+            os.makedirs(RENDER_DATA_DIR, exist_ok=True)
+            logger.info(f"Created data directory: {RENDER_DATA_DIR}")
+        except Exception as e:
+            logger.error(f"Failed to create data directory {RENDER_DATA_DIR}: {e}")
+    else:
+        logger.info(f"Data directory exists: {RENDER_DATA_DIR}")
+
+    logger.info(f"Render mode: DB_NAME={DB_NAME}")
 else:
-    # נתיב מקומי למחשב שלך
+    # Local development path
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     DB_NAME = os.path.join(BASE_DIR, "greece_project.db")
+    logger.info(f"Local mode: DB_NAME={DB_NAME}")
 
-# בגלל ש-DB_NAME מתחיל ב-/, ה-URL יכיל אוטומטית 4 סלאשים (תקין ל-SQLAlchemy)
 SQLALCHEMY_DATABASE_URL = f"sqlite:///{DB_NAME}"
+logger.info(f"SQLAlchemy URL: {SQLALCHEMY_DATABASE_URL}")
 
-# --- חלק 1: הגדרות עבור SQLAlchemy ---
+# --- SQLAlchemy setup ---
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
 )
@@ -27,17 +43,8 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
 
-# --- חלק 2: הגדרות עבור Raw SQLite ---
+# --- Raw SQLite connection ---
 def get_db_connection():
-    # מוודא שהתיקייה קיימת בנתיב המלא ב-Render
-    if IS_RENDER:
-        render_data_dir = "/opt/render/project/src/data"
-        if not os.path.exists(render_data_dir):
-            try:
-                os.makedirs(render_data_dir)
-            except:
-                pass
-            
     conn = sqlite3.connect(DB_NAME)
     conn.row_factory = sqlite3.Row
     return conn

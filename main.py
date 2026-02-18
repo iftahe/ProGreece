@@ -5,17 +5,28 @@ from typing import List, Optional
 from datetime import datetime
 from fastapi.middleware.cors import CORSMiddleware
 import json
+import os
+import logging
 import models, schemas
 import services.budget_report_service
 import services.forecast_service
-from database import SessionLocal, engine
+from database import SessionLocal, engine, DB_NAME, IS_RENDER
 
-# יצירת הטבלאות (רק אם לא קיימות, לא דורס)
-models.Base.metadata.create_all(bind=engine)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Create tables (only if they don't exist)
+try:
+    models.Base.metadata.create_all(bind=engine)
+    logger.info("Database tables created/verified successfully")
+except Exception as e:
+    logger.error(f"CRITICAL: Failed to create database tables: {e}")
+    import traceback
+    traceback.print_exc()
 
 app = FastAPI()
 
-# הגדרת CORS (כדי שהאתר יוכל לדבר עם השרת)
+# CORS configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -37,6 +48,26 @@ def get_db():
 @app.get("/")
 def read_root():
     return {"message": "ProGreece API is running"}
+
+@app.get("/health")
+def health_check():
+    """Health check endpoint for monitoring and debugging deployment issues."""
+    status = {"api": "ok", "render": bool(IS_RENDER), "db_path": DB_NAME}
+    try:
+        db_exists = os.path.exists(DB_NAME)
+        status["db_file_exists"] = db_exists
+        if db_exists:
+            status["db_size_bytes"] = os.path.getsize(DB_NAME)
+        # Test actual DB connectivity
+        db = SessionLocal()
+        count = db.query(models.Project).count()
+        db.close()
+        status["db_connected"] = True
+        status["project_count"] = count
+    except Exception as e:
+        status["db_connected"] = False
+        status["db_error"] = str(e)
+    return status
 
 @app.get("/projects/", response_model=List[schemas.Project])
 def read_projects(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
