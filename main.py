@@ -1,5 +1,3 @@
-print("[main.py] Starting imports...", flush=True)
-
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
@@ -8,25 +6,13 @@ from datetime import datetime
 from fastapi.middleware.cors import CORSMiddleware
 import json
 import os
-
-print("[main.py] Importing models...", flush=True)
 import models, schemas
-print("[main.py] Importing services...", flush=True)
 import services.budget_report_service
 import services.forecast_service
-print("[main.py] Importing database...", flush=True)
 from database import SessionLocal, engine, DB_NAME, IS_RENDER
 
-print("[main.py] All imports OK", flush=True)
-
 # Create tables (only if they don't exist)
-try:
-    models.Base.metadata.create_all(bind=engine)
-    print("[main.py] Database tables created/verified successfully", flush=True)
-except Exception as e:
-    print(f"[main.py] WARNING: Failed to create database tables: {e}", flush=True)
-    import traceback
-    traceback.print_exc()
+models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
@@ -38,8 +24,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-print("[main.py] FastAPI app created, routes loading...", flush=True)
 
 # Dependency
 def get_db():
@@ -57,14 +41,13 @@ def read_root():
 
 @app.get("/health")
 def health_check():
-    """Health check endpoint for monitoring and debugging deployment issues."""
+    """Health check endpoint for deployment diagnostics."""
     status = {"api": "ok", "render": bool(IS_RENDER), "db_path": DB_NAME}
     try:
         db_exists = os.path.exists(DB_NAME)
         status["db_file_exists"] = db_exists
         if db_exists:
             status["db_size_bytes"] = os.path.getsize(DB_NAME)
-        # Test actual DB connectivity
         db = SessionLocal()
         count = db.query(models.Project).count()
         db.close()
@@ -74,8 +57,6 @@ def health_check():
         status["db_connected"] = False
         status["db_error"] = str(e)
     return status
-
-print("[main.py] App ready to serve", flush=True)
 
 @app.get("/projects/", response_model=List[schemas.Project])
 def read_projects(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
