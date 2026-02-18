@@ -34,6 +34,22 @@ if IS_RENDER:
         except Exception as e:
             print(f"[database.py] Cannot list directory: {e}", flush=True)
 
+    # Seed: if persistent disk DB is missing/empty, copy from repo
+    import shutil
+    REPO_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "greece_project.db")
+    needs_seed = not os.path.exists(DB_NAME) or os.path.getsize(DB_NAME) == 0
+
+    if needs_seed and os.path.exists(REPO_DB) and os.path.getsize(REPO_DB) > 0:
+        try:
+            shutil.copy2(REPO_DB, DB_NAME)
+            print(f"[database.py] SEEDED persistent disk DB from repo ({os.path.getsize(REPO_DB)} bytes)", flush=True)
+        except Exception as e:
+            print(f"[database.py] ERROR seeding DB: {e}", flush=True)
+    elif needs_seed:
+        print(f"[database.py] WARNING: Persistent disk DB empty and no repo seed found at {REPO_DB}", flush=True)
+    else:
+        print(f"[database.py] Persistent disk DB exists ({os.path.getsize(DB_NAME)} bytes)", flush=True)
+
     print(f"[database.py] Render mode: DB_NAME={DB_NAME}", flush=True)
 else:
     # Local development path
