@@ -34,10 +34,27 @@ if IS_RENDER:
         except Exception as e:
             print(f"[database.py] Cannot list directory: {e}", flush=True)
 
-    # Seed: if persistent disk DB is missing/empty, copy from repo
+    # Seed: if persistent disk DB has no data, copy from repo
     import shutil
     REPO_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "greece_project.db")
-    needs_seed = not os.path.exists(DB_NAME) or os.path.getsize(DB_NAME) == 0
+
+    # Check if disk DB actually has data (not just empty tables)
+    needs_seed = False
+    if not os.path.exists(DB_NAME):
+        needs_seed = True
+        print(f"[database.py] DB file missing - needs seed", flush=True)
+    else:
+        try:
+            _conn = sqlite3.connect(DB_NAME)
+            _count = _conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0]
+            _conn.close()
+            print(f"[database.py] Disk DB has {_count} projects ({os.path.getsize(DB_NAME)} bytes)", flush=True)
+            if _count == 0:
+                needs_seed = True
+                print(f"[database.py] DB has empty tables - needs seed", flush=True)
+        except Exception as e:
+            needs_seed = True
+            print(f"[database.py] Cannot query disk DB ({e}) - needs seed", flush=True)
 
     if needs_seed and os.path.exists(REPO_DB) and os.path.getsize(REPO_DB) > 0:
         try:
@@ -46,9 +63,9 @@ if IS_RENDER:
         except Exception as e:
             print(f"[database.py] ERROR seeding DB: {e}", flush=True)
     elif needs_seed:
-        print(f"[database.py] WARNING: Persistent disk DB empty and no repo seed found at {REPO_DB}", flush=True)
+        print(f"[database.py] WARNING: needs seed but no repo DB found at {REPO_DB}", flush=True)
     else:
-        print(f"[database.py] Persistent disk DB exists ({os.path.getsize(DB_NAME)} bytes)", flush=True)
+        print(f"[database.py] Disk DB has data, no seed needed", flush=True)
 
     print(f"[database.py] Render mode: DB_NAME={DB_NAME}", flush=True)
 else:
