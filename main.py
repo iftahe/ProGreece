@@ -1,3 +1,5 @@
+print("[main.py] Starting imports...", flush=True)
+
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
@@ -6,21 +8,23 @@ from datetime import datetime
 from fastapi.middleware.cors import CORSMiddleware
 import json
 import os
-import logging
+
+print("[main.py] Importing models...", flush=True)
 import models, schemas
+print("[main.py] Importing services...", flush=True)
 import services.budget_report_service
 import services.forecast_service
+print("[main.py] Importing database...", flush=True)
 from database import SessionLocal, engine, DB_NAME, IS_RENDER
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+print("[main.py] All imports OK", flush=True)
 
 # Create tables (only if they don't exist)
 try:
     models.Base.metadata.create_all(bind=engine)
-    logger.info("Database tables created/verified successfully")
+    print("[main.py] Database tables created/verified successfully", flush=True)
 except Exception as e:
-    logger.error(f"CRITICAL: Failed to create database tables: {e}")
+    print(f"[main.py] WARNING: Failed to create database tables: {e}", flush=True)
     import traceback
     traceback.print_exc()
 
@@ -34,6 +38,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+print("[main.py] FastAPI app created, routes loading...", flush=True)
 
 # Dependency
 def get_db():
@@ -68,6 +74,8 @@ def health_check():
         status["db_connected"] = False
         status["db_error"] = str(e)
     return status
+
+print("[main.py] App ready to serve", flush=True)
 
 @app.get("/projects/", response_model=List[schemas.Project])
 def read_projects(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):

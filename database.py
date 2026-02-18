@@ -3,12 +3,15 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import sqlite3
 import os
-import logging
+import sys
 
-logger = logging.getLogger(__name__)
+print("=" * 50, flush=True)
+print("[database.py] Module loading...", flush=True)
 
 # Check if running on Render
 IS_RENDER = os.environ.get("RENDER")
+PORT = os.environ.get("PORT", "not set")
+print(f"[database.py] IS_RENDER={IS_RENDER}, PORT={PORT}", flush=True)
 
 if IS_RENDER:
     # Fixed path matching the Render persistent disk mount
@@ -19,27 +22,38 @@ if IS_RENDER:
     if not os.path.exists(RENDER_DATA_DIR):
         try:
             os.makedirs(RENDER_DATA_DIR, exist_ok=True)
-            logger.info(f"Created data directory: {RENDER_DATA_DIR}")
+            print(f"[database.py] Created data directory: {RENDER_DATA_DIR}", flush=True)
         except Exception as e:
-            logger.error(f"Failed to create data directory {RENDER_DATA_DIR}: {e}")
+            print(f"[database.py] ERROR creating directory: {e}", flush=True)
     else:
-        logger.info(f"Data directory exists: {RENDER_DATA_DIR}")
+        print(f"[database.py] Data directory exists: {RENDER_DATA_DIR}", flush=True)
+        # List contents for debugging
+        try:
+            contents = os.listdir(RENDER_DATA_DIR)
+            print(f"[database.py] Directory contents: {contents}", flush=True)
+        except Exception as e:
+            print(f"[database.py] Cannot list directory: {e}", flush=True)
 
-    logger.info(f"Render mode: DB_NAME={DB_NAME}")
+    print(f"[database.py] Render mode: DB_NAME={DB_NAME}", flush=True)
 else:
     # Local development path
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     DB_NAME = os.path.join(BASE_DIR, "greece_project.db")
-    logger.info(f"Local mode: DB_NAME={DB_NAME}")
+    print(f"[database.py] Local mode: DB_NAME={DB_NAME}", flush=True)
 
 SQLALCHEMY_DATABASE_URL = f"sqlite:///{DB_NAME}"
-logger.info(f"SQLAlchemy URL: {SQLALCHEMY_DATABASE_URL}")
+print(f"[database.py] SQLAlchemy URL: {SQLALCHEMY_DATABASE_URL}", flush=True)
 
 # --- SQLAlchemy setup ---
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
-)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+try:
+    engine = create_engine(
+        SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
+    )
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    print("[database.py] Engine created successfully", flush=True)
+except Exception as e:
+    print(f"[database.py] FATAL: Engine creation failed: {e}", flush=True)
+    sys.exit(1)
 
 Base = declarative_base()
 
@@ -48,3 +62,5 @@ def get_db_connection():
     conn = sqlite3.connect(DB_NAME)
     conn.row_factory = sqlite3.Row
     return conn
+
+print("[database.py] Module loaded OK", flush=True)
