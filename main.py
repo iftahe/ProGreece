@@ -1080,6 +1080,57 @@ def diagnostics_system_accounts(db: Session = Depends(get_db)):
     }
 
 
+@app.post("/admin/cleanup-duplicate-apartments")
+def cleanup_duplicate_apartments(db: Session = Depends(get_db)):
+    """One-time cleanup: remove duplicate apartments, reassign linked records to the oldest copy."""
+    dup_groups = db.query(
+        models.Apartment.project_id,
+        models.Apartment.apartment_number,
+    ).filter(
+        models.Apartment.apartment_number.isnot(None),
+        models.Apartment.apartment_number != "",
+    ).group_by(
+        models.Apartment.project_id,
+        models.Apartment.apartment_number,
+    ).having(func.count(models.Apartment.id) > 1).all()
+
+    if not dup_groups:
+        return {"message": "No duplicates found", "deleted": 0, "reassigned": 0}
+
+    deleted = 0
+    reassigned = 0
+
+    for g in dup_groups:
+        apts = db.query(models.Apartment).filter(
+            models.Apartment.project_id == g.project_id,
+            models.Apartment.apartment_number == g.apartment_number,
+        ).order_by(models.Apartment.id).all()
+
+        keep = apts[0]
+        for apt in apts[1:]:
+            # Reassign transactions
+            txns = db.query(models.Transaction).filter(
+                models.Transaction.apartment_id == apt.id
+            ).all()
+            for tx in txns:
+                tx.apartment_id = keep.id
+                reassigned += 1
+
+            # Reassign payments
+            payments = db.query(models.CustomerPayment).filter(
+                models.CustomerPayment.apartment_id == apt.id
+            ).all()
+            for p in payments:
+                p.apartment_id = keep.id
+                reassigned += 1
+
+            db.delete(apt)
+            deleted += 1
+
+    db.commit()
+    return {"message": "Cleanup complete", "deleted": deleted, "reassigned": reassigned}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=8000)
