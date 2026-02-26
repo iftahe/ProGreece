@@ -50,9 +50,30 @@ def health_check():
             status["db_size_bytes"] = os.path.getsize(DB_NAME)
         db = SessionLocal()
         count = db.query(models.Project).count()
-        db.close()
         status["db_connected"] = True
         status["project_count"] = count
+
+        # Duplicate apartment audit
+        dup_query = db.query(
+            models.Apartment.project_id,
+            models.Apartment.apartment_number,
+            func.count(models.Apartment.id).label("cnt")
+        ).filter(
+            models.Apartment.apartment_number.isnot(None),
+            models.Apartment.apartment_number != "",
+        ).group_by(
+            models.Apartment.project_id,
+            models.Apartment.apartment_number,
+        ).having(func.count(models.Apartment.id) > 1).all()
+
+        extra_copies = sum(row.cnt - 1 for row in dup_query)
+        status["duplicate_apartments"] = extra_copies
+        status["duplicate_apartment_groups"] = [
+            {"project_id": row.project_id, "apartment_number": row.apartment_number, "count": row.cnt}
+            for row in dup_query
+        ]
+
+        db.close()
     except Exception as e:
         status["db_connected"] = False
         status["db_error"] = str(e)
@@ -129,11 +150,14 @@ def read_transactions(
     search: Optional[str] = None,
     transaction_type: Optional[int] = None,
     tx_type: Optional[str] = None,
+    budget_item_id: Optional[int] = None,
     db: Session = Depends(get_db),
 ):
     query = db.query(models.Transaction)
     if project_id:
         query = query.filter(models.Transaction.project_id == project_id)
+    if budget_item_id:
+        query = query.filter(models.Transaction.budget_item_id == budget_item_id)
     if date_from:
         query = query.filter(models.Transaction.date >= datetime.fromisoformat(date_from))
     if date_to:
@@ -932,59 +956,72 @@ def create_direct_to_owner_payment(
     ).first()
 
     if not direct_account:
-        raise HTTPException(status_code=400, detail="Direct Account not found. Please create a system account with 'Direct' in the name.")
+        # Check if a "Direct" account exists but isn't marked as system
+        maybe_direct = db.query(models.Account).filter(
+            models.Account.name.ilike("%direct%")
+        ).first()
+        if maybe_direct:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Found account '{maybe_direct.name}' (id={maybe_direct.id}) but is_system_account is not set. Please set is_system_account=1 on this account."
+            )
+        raise HTTPException(status_code=400, detail="No account with 'Direct' in the name exists. Please create a system account with 'Direct' in the name.")
     if not owner_account:
-        raise HTTPException(status_code=400, detail="Owner Account not found. Please create an account with 'Owner' in the name.")
+        raise HTTPException(status_code=400, detail="No account with 'Owner' in the name exists. Please create an account with 'Owner' in the name.")
 
     customer_name = apartment.customer_name or "Unknown"
 
-    # Create CustomerPayment record
-    db_payment = models.CustomerPayment(
-        apartment_id=apartment_id,
-        date=payment.date,
-        amount=payment.amount,
-        payment_method="Direct to Owner",
-        notes=payment.notes,
-    )
-    db.add(db_payment)
-    db.commit()
-    db.refresh(db_payment)
+    try:
+        # Create CustomerPayment record
+        db_payment = models.CustomerPayment(
+            apartment_id=apartment_id,
+            date=payment.date,
+            amount=payment.amount,
+            payment_method="Direct to Owner",
+            notes=payment.notes,
+        )
+        db.add(db_payment)
+        db.flush()
 
-    # TX1: Income to Direct Account
-    tx1 = models.Transaction(
-        project_id=apartment.project_id,
-        date=payment.date,
-        amount=payment.amount,
-        to_account_id=direct_account.id,
-        remarks=f"Direct to Owner - {customer_name} - IN",
-        transaction_type=1,
-        type="income",
-        apartment_id=apartment_id,
-    )
-    db.add(tx1)
-    db.commit()
-    db.refresh(tx1)
+        # TX1: Income to Direct Account
+        tx1 = models.Transaction(
+            project_id=apartment.project_id,
+            date=payment.date,
+            amount=payment.amount,
+            to_account_id=direct_account.id,
+            remarks=f"Direct to Owner - {customer_name} - IN",
+            transaction_type=1,
+            type="income",
+            apartment_id=apartment_id,
+        )
+        db.add(tx1)
+        db.flush()
 
-    # TX2: Expense from Direct Account to Owner Account
-    tx2 = models.Transaction(
-        project_id=apartment.project_id,
-        date=payment.date,
-        amount=payment.amount,
-        from_account_id=direct_account.id,
-        to_account_id=owner_account.id,
-        remarks=f"Direct to Owner - {customer_name} - OUT",
-        transaction_type=1,
-        type="expense",
-        apartment_id=apartment_id,
-    )
-    db.add(tx2)
-    db.commit()
-    db.refresh(tx2)
+        # TX2: Expense from Direct Account to Owner Account
+        tx2 = models.Transaction(
+            project_id=apartment.project_id,
+            date=payment.date,
+            amount=payment.amount,
+            from_account_id=direct_account.id,
+            to_account_id=owner_account.id,
+            remarks=f"Direct to Owner - {customer_name} - OUT",
+            transaction_type=1,
+            type="expense",
+            apartment_id=apartment_id,
+        )
+        db.add(tx2)
+        db.flush()
 
-    # Store linked transaction IDs
-    db_payment.linked_transaction_ids = json.dumps([tx1.id, tx2.id])
-    db.commit()
-    db.refresh(db_payment)
+        # Store linked transaction IDs
+        db_payment.linked_transaction_ids = json.dumps([tx1.id, tx2.id])
+
+        db.commit()
+        db.refresh(db_payment)
+        db.refresh(tx1)
+        db.refresh(tx2)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to create Direct to Owner payment: {str(e)}")
 
     return {
         "payment": {
@@ -997,6 +1034,49 @@ def create_direct_to_owner_payment(
             "linked_transaction_ids": db_payment.linked_transaction_ids,
         },
         "transactions_created": 2,
+    }
+
+
+# --- Diagnostics ---
+
+@app.get("/diagnostics/system-accounts")
+def diagnostics_system_accounts(db: Session = Depends(get_db)):
+    """Returns all accounts with system account flags, highlights Direct and Owner candidates."""
+    all_accounts = db.query(models.Account).all()
+    accounts_list = []
+    direct_candidate = None
+    owner_candidate = None
+
+    for acc in all_accounts:
+        entry = {
+            "id": acc.id,
+            "name": acc.name,
+            "is_system_account": bool(acc.is_system_account),
+        }
+        if "direct" in (acc.name or "").lower():
+            entry["role"] = "Direct Account candidate"
+            if acc.is_system_account:
+                direct_candidate = acc
+        if "owner" in (acc.name or "").lower():
+            entry["role"] = "Owner Account candidate"
+            owner_candidate = acc
+        accounts_list.append(entry)
+
+    issues = []
+    if not direct_candidate:
+        # Check if there's a non-system Direct account
+        maybe = next((a for a in all_accounts if "direct" in (a.name or "").lower()), None)
+        if maybe:
+            issues.append(f"Account '{maybe.name}' (id={maybe.id}) found but is_system_account is not set")
+        else:
+            issues.append("No account with 'Direct' in the name exists")
+    if not owner_candidate:
+        issues.append("No account with 'Owner' in the name exists")
+
+    return {
+        "accounts": accounts_list,
+        "status": "ok" if not issues else "misconfigured",
+        "issues": issues,
     }
 
 

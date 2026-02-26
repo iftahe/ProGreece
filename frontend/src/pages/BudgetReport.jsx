@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { getBudgetReport, getBudgetTimeline, updateBudgetCategory } from '../api';
+import { getBudgetReport, getBudgetTimeline, updateBudgetCategory, getTransactions } from '../api';
 import { useProject } from '../contexts/ProjectContext';
 import { PencilIcon, CheckIcon, XIcon, EmptyStateIcon, CalendarPlanIcon, TimelineIcon, TableIcon } from '../components/Icons';
 import BudgetPlanEditor from '../components/BudgetPlanEditor';
@@ -149,6 +149,9 @@ const BudgetReport = () => {
     const [message, setMessage] = useState(null);
     const [planningCategoryId, setPlanningCategoryId] = useState(null);
     const [viewMode, setViewMode] = useState('table');
+    const [drilldownCategory, setDrilldownCategory] = useState(null);
+    const [drilldownTransactions, setDrilldownTransactions] = useState([]);
+    const [drilldownLoading, setDrilldownLoading] = useState(false);
 
     useEffect(() => {
         if (selectedProjectId) {
@@ -209,6 +212,24 @@ const BudgetReport = () => {
             setMessage({ type: 'error', text: 'Failed to update budget amount' });
         } finally {
             setSaving(false);
+        }
+    };
+
+    const handleActualClick = async (item) => {
+        setDrilldownCategory(item);
+        setDrilldownLoading(true);
+        setDrilldownTransactions([]);
+        try {
+            const result = await getTransactions({
+                budget_item_id: item.id,
+                project_id: selectedProjectId,
+                limit: 200,
+            });
+            setDrilldownTransactions(result.items || []);
+        } catch (error) {
+            console.error("Failed to load drill-down transactions", error);
+        } finally {
+            setDrilldownLoading(false);
         }
     };
 
@@ -378,7 +399,16 @@ const BudgetReport = () => {
                                                     )}
                                                 </td>
                                                 <td className={cn('px-6 py-3 whitespace-nowrap text-right amount', item.is_parent && 'font-bold')}>
-                                                    {formatEURDecimal(item.actual)}
+                                                    {isChild && item.actual > 0 ? (
+                                                        <button
+                                                            onClick={() => handleActualClick(item)}
+                                                            className="text-primary-600 hover:text-primary-800 underline decoration-dotted underline-offset-2 cursor-pointer"
+                                                        >
+                                                            {formatEURDecimal(item.actual)}
+                                                        </button>
+                                                    ) : (
+                                                        formatEURDecimal(item.actual)
+                                                    )}
                                                 </td>
                                                 <td className={cn(
                                                     'px-6 py-3 whitespace-nowrap text-right font-medium amount',
@@ -585,6 +615,82 @@ const BudgetReport = () => {
                         <TimelineIcon className="w-16 h-16 text-gray-300 mb-4" />
                         <p className="text-gray-500 text-sm">Add expense plans to categories to see the timeline view.</p>
                         <p className="text-gray-400 text-xs mt-1">Use the Table view and click the calendar icon to add plans.</p>
+                    </div>
+                </div>
+            )}
+
+            {/* Drill-down Modal */}
+            {drilldownCategory && (
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+                    onClick={() => setDrilldownCategory(null)}
+                >
+                    <div
+                        className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[80vh] flex flex-col mx-4"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+                            <h3 className="text-lg font-semibold text-gray-900">
+                                Transactions: {drilldownCategory.name}
+                            </h3>
+                            <button
+                                onClick={() => setDrilldownCategory(null)}
+                                className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+                            >
+                                <XIcon className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <div className="overflow-auto flex-1">
+                            {drilldownLoading ? (
+                                <div className="px-6 py-12 text-center">
+                                    <div className="skeleton h-6 w-48 mx-auto mb-3" />
+                                    <div className="skeleton h-4 w-32 mx-auto" />
+                                </div>
+                            ) : drilldownTransactions.length === 0 ? (
+                                <div className="px-6 py-12 text-center text-gray-400 text-sm">
+                                    No transactions found for this category.
+                                </div>
+                            ) : (
+                                <table className="min-w-full divide-y divide-gray-200 text-sm">
+                                    <thead className="bg-slate-50">
+                                        <tr>
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+                                            <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100">
+                                        {drilldownTransactions.map(tx => (
+                                            <tr key={tx.id} className="hover:bg-gray-50">
+                                                <td className="px-4 py-3 whitespace-nowrap text-gray-900">
+                                                    {new Date(tx.date).toLocaleDateString('en-GB')}
+                                                </td>
+                                                <td className="px-4 py-3 text-gray-500 max-w-[250px] truncate">
+                                                    {tx.remarks || tx.description || '-'}
+                                                </td>
+                                                <td className={cn(
+                                                    "px-4 py-3 whitespace-nowrap text-right font-semibold amount",
+                                                    tx.type === 'income' ? "text-emerald-600" : "text-rose-600"
+                                                )}>
+                                                    {formatEUR(tx.amount)}
+                                                </td>
+                                                <td className="px-4 py-3 whitespace-nowrap">
+                                                    <span className={cn(
+                                                        "inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-full",
+                                                        tx.type === 'income'
+                                                            ? "bg-emerald-50 text-emerald-700"
+                                                            : "bg-rose-50 text-rose-700"
+                                                    )}>
+                                                        {tx.type === 'income' ? 'Income' : 'Expense'}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            )}
+                        </div>
                     </div>
                 </div>
             )}

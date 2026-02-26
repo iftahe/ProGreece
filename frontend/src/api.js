@@ -52,7 +52,7 @@ export const getBudgetReport = async (projectId) => {
     return response.data;
 };
 
-export const getTransactions = async ({ skip = 0, limit = 50, project_id = null, date_from = null, date_to = null, search = null, transaction_type = null, tx_type = null } = {}) => {
+export const getTransactions = async ({ skip = 0, limit = 50, project_id = null, date_from = null, date_to = null, search = null, transaction_type = null, tx_type = null, budget_item_id = null } = {}) => {
     const params = { skip, limit };
     if (project_id) params.project_id = project_id;
     if (date_from) params.date_from = date_from;
@@ -60,6 +60,7 @@ export const getTransactions = async ({ skip = 0, limit = 50, project_id = null,
     if (search) params.search = search;
     if (transaction_type !== null && transaction_type !== undefined) params.transaction_type = transaction_type;
     if (tx_type) params.tx_type = tx_type;
+    if (budget_item_id) params.budget_item_id = budget_item_id;
     const response = await api.get('/transactions/', { params });
     return response.data;
 };

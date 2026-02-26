@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { getAccounts, createTransaction, getTransactions, deleteTransaction, updateTransaction, getBudgetCategories, getSuggestedCategory, searchApartments } from "../api";
+import { getAccounts, createTransaction, getTransactions, deleteTransaction, updateTransaction, getBudgetCategories, getSuggestedCategory, getApartments } from "../api";
 import { useProject } from '../contexts/ProjectContext';
 import { PencilIcon, TrashIcon, EmptyStateIcon, SearchIcon } from '../components/Icons';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -40,10 +40,8 @@ const Transactions = () => {
     const [statusFilter, setStatusFilter] = useState('all');
     const searchTimeout = useRef(null);
 
-    // Feature 1: Apartment suggestion state
-    const [apartmentSuggestions, setApartmentSuggestions] = useState([]);
-    const [selectedApartmentLink, setSelectedApartmentLink] = useState(null);
-    const apartmentSearchTimeout = useRef(null);
+    // Apartment dropdown state
+    const [projectApartments, setProjectApartments] = useState([]);
 
     const initialFormState = {
         date: new Date().toISOString().split('T')[0],
@@ -121,24 +119,23 @@ const Transactions = () => {
         suggestCategory();
     }, [formData.to_account_id]);
 
-    // Feature 1: Apartment search on description change
+    // Load apartments when project changes
     useEffect(() => {
-        if (apartmentSearchTimeout.current) clearTimeout(apartmentSearchTimeout.current);
-        const desc = formData.description || '';
-        if (desc.length >= 3 && formData.project_id) {
-            apartmentSearchTimeout.current = setTimeout(async () => {
+        const loadApartments = async () => {
+            if (formData.project_id) {
                 try {
-                    const results = await searchApartments(desc, formData.project_id);
-                    setApartmentSuggestions(results);
+                    const result = await getApartments(formData.project_id, { limit: 200 });
+                    setProjectApartments(result.items || []);
                 } catch (error) {
-                    setApartmentSuggestions([]);
+                    console.error("Failed to load apartments", error);
+                    setProjectApartments([]);
                 }
-            }, 300);
-        } else {
-            setApartmentSuggestions([]);
-        }
-        return () => clearTimeout(apartmentSearchTimeout.current);
-    }, [formData.description, formData.project_id]);
+            } else {
+                setProjectApartments([]);
+            }
+        };
+        loadApartments();
+    }, [formData.project_id]);
 
     const loadData = async () => {
         try {
@@ -239,20 +236,12 @@ const Transactions = () => {
             status: transaction.transaction_type === 1 ? 'Executed' : 'Planned',
             apartment_id: transaction.apartment_id || '',
         });
-        if (transaction.apartment_id) {
-            setSelectedApartmentLink({ id: transaction.apartment_id });
-        } else {
-            setSelectedApartmentLink(null);
-        }
-        setApartmentSuggestions([]);
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
     const resetForm = () => {
         setEditingId(null);
         setFormData({ ...initialFormState, project_id: selectedProjectId || '' });
-        setSelectedApartmentLink(null);
-        setApartmentSuggestions([]);
     };
 
     const cleanField = (val) => {
@@ -335,44 +324,9 @@ const Transactions = () => {
                                 <label className="block text-sm font-medium text-gray-700">{'Amount'}</label>
                                 <input type="number" step="0.01" name="amount" value={formData.amount} onChange={handleChange} required className="input-field" />
                             </div>
-                            <div className="md:col-span-2 relative">
+                            <div className="md:col-span-2">
                                 <label className="block text-sm font-medium text-gray-700">{'Description'}</label>
                                 <input type="text" name="description" value={formData.description} onChange={handleChange} className="input-field" />
-                                {/* Feature 1: Apartment suggestions dropdown */}
-                                {apartmentSuggestions.length > 0 && !selectedApartmentLink && (
-                                    <div className="absolute z-10 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                                        {apartmentSuggestions.map(apt => (
-                                            <button
-                                                key={apt.id}
-                                                type="button"
-                                                className="w-full px-4 py-2 text-left text-sm hover:bg-primary-50 flex justify-between items-center"
-                                                onClick={() => {
-                                                    setFormData(prev => ({ ...prev, apartment_id: apt.id }));
-                                                    setSelectedApartmentLink(apt);
-                                                    setApartmentSuggestions([]);
-                                                }}
-                                            >
-                                                <span className="font-medium text-gray-900">{apt.customer_name}</span>
-                                                <span className="text-xs text-gray-400">{apt.name}</span>
-                                            </button>
-                                        ))}
-                                    </div>
-                                )}
-                                {selectedApartmentLink && (
-                                    <span className="inline-flex items-center gap-1 mt-1 px-2.5 py-1 bg-primary-50 text-primary-700 text-xs font-medium rounded-full">
-                                        Linked: {selectedApartmentLink.customer_name || `Apt #${selectedApartmentLink.id}`}
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                setSelectedApartmentLink(null);
-                                                setFormData(prev => ({ ...prev, apartment_id: '' }));
-                                            }}
-                                            className="ml-1 text-primary-500 hover:text-primary-800"
-                                        >
-                                            &times;
-                                        </button>
-                                    </span>
-                                )}
                             </div>
                         </div>
                     </fieldset>
@@ -380,7 +334,7 @@ const Transactions = () => {
                     {/* Categorization */}
                     <fieldset className="space-y-3">
                         <legend className="text-xs font-semibold text-gray-400 uppercase tracking-wider">{'Classification'}</legend>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">{'Project'}</label>
                                 <select name="project_id" value={formData.project_id} onChange={handleChange} className="input-field">
@@ -400,6 +354,23 @@ const Transactions = () => {
                                     <option value="">{formData.project_id && budgetCategories.length === 0 ? 'Loading...' : 'Select Category (optional)'}</option>
                                     {budgetCategories.map(cat => (
                                         <option key={cat.id} value={cat.id}>{getCategoryDisplayName(cat)}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">{'Apartment'}</label>
+                                <select
+                                    name="apartment_id"
+                                    value={formData.apartment_id}
+                                    onChange={handleChange}
+                                    className="input-field"
+                                    disabled={!formData.project_id}
+                                >
+                                    <option value="">{'Select Apartment (optional)'}</option>
+                                    {projectApartments.map(apt => (
+                                        <option key={apt.id} value={apt.id}>
+                                            {apt.name}{apt.customer_name ? ` - ${apt.customer_name}` : ''}
+                                        </option>
                                     ))}
                                 </select>
                             </div>

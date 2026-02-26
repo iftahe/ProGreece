@@ -16,8 +16,18 @@ def import_apartments_from_csv(db: Session, file_content: bytes):
     projects = db.query(models.Project).all()
     project_map = {p.name.lower().strip(): p.id for p in projects}
 
+    # Pre-load existing (project_id, apartment_number) pairs for duplicate detection
+    existing_apartments = db.query(
+        models.Apartment.project_id, models.Apartment.apartment_number
+    ).filter(
+        models.Apartment.apartment_number.isnot(None),
+        models.Apartment.apartment_number != "",
+    ).all()
+    existing_set = {(row.project_id, row.apartment_number.strip().lower()) for row in existing_apartments}
+
     imported = 0
     skipped = 0
+    duplicates = 0
     unmapped_projects = set()
 
     # Decode uploaded file and read as CSV
@@ -56,6 +66,14 @@ def import_apartments_from_csv(db: Session, file_content: bytes):
 
             remarks = (row.get('remarks') or '').strip() or None
 
+            # Duplicate detection: check if (project_id, apartment_number) already exists
+            if apt_num:
+                dup_key = (project_id, apt_num.strip().lower())
+                if dup_key in existing_set:
+                    duplicates += 1
+                    continue
+                existing_set.add(dup_key)
+
             apartment = models.Apartment(
                 project_id=project_id,
                 name=name,
@@ -75,5 +93,6 @@ def import_apartments_from_csv(db: Session, file_content: bytes):
     return {
         "imported": imported,
         "skipped": skipped,
+        "duplicates": duplicates,
         "unmapped_projects": list(unmapped_projects),
     }
