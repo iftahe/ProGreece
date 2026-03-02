@@ -1080,6 +1080,174 @@ def diagnostics_system_accounts(db: Session = Depends(get_db)):
     }
 
 
+# --- Admin: Bulk Budget Mapper ---
+
+def _normalize(s):
+    """Normalize string for matching: lowercase, strip, collapse whitespace."""
+    if not s:
+        return ""
+    return " ".join(str(s).strip().lower().split())
+
+def _match_transaction_to_category(tx, budget_categories):
+    """
+    Try to match a transaction to a budget category using keyword heuristics.
+    Returns (category_id, category_name, match_method) or (None, None, None).
+    """
+    # Collect searchable text from the transaction
+    tx_category = _normalize(tx.category)
+    tx_description = _normalize(tx.description)
+    tx_remarks = _normalize(tx.remarks)
+
+    best_match = None
+    best_score = 0
+
+    for cat in budget_categories:
+        cat_name_norm = _normalize(cat.category_name)
+        if not cat_name_norm:
+            continue
+
+        score = 0
+        method = None
+
+        # 1. Exact match on legacy category field (highest confidence)
+        if tx_category and tx_category == cat_name_norm:
+            score = 100
+            method = "exact_category"
+
+        # 2. Category field contains the budget category name
+        elif tx_category and cat_name_norm in tx_category:
+            score = 80
+            method = "category_contains"
+
+        # 3. Budget category name found in description or remarks
+        elif tx_description and cat_name_norm in tx_description:
+            score = 60
+            method = "description_contains"
+        elif tx_remarks and cat_name_norm in tx_remarks:
+            score = 60
+            method = "remarks_contains"
+
+        else:
+            # 4. Keyword matching: all words from category name appear in any field
+            cat_words = cat_name_norm.split()
+            if len(cat_words) > 0:
+                combined_text = f"{tx_category} {tx_description} {tx_remarks}"
+                matches = sum(1 for w in cat_words if w in combined_text)
+                if matches == len(cat_words):
+                    score = 40
+                    method = "keyword_match"
+
+        if score > best_score:
+            best_score = score
+            best_match = (cat.id, cat.category_name, method)
+
+    return best_match if best_match else (None, None, None)
+
+
+@app.post("/admin/budget-mapper/{project_id}")
+def bulk_budget_mapper(
+    project_id: int,
+    dry_run: bool = Query(True, description="If true, preview only; if false, commit changes"),
+    db: Session = Depends(get_db),
+):
+    """
+    Scan transactions with empty budget_item_id and attempt to map them
+    to budget categories based on keywords in category/description/remarks.
+    """
+    # Fetch budget categories for this project
+    budget_categories = db.query(models.BudgetCategory).filter(
+        models.BudgetCategory.project_id == project_id
+    ).all()
+
+    if not budget_categories:
+        raise HTTPException(status_code=404, detail="No budget categories found for this project")
+
+    # Fetch unmapped transactions for this project
+    unmapped_txs = db.query(models.Transaction).filter(
+        models.Transaction.project_id == project_id,
+        (models.Transaction.budget_item_id == None) | (models.Transaction.budget_item_id == 0),
+    ).all()
+
+    mappings = []       # Successfully matched
+    unmatched = []      # Could not match
+    updated_count = 0
+
+    for tx in unmapped_txs:
+        cat_id, cat_name, method = _match_transaction_to_category(tx, budget_categories)
+
+        if cat_id:
+            mappings.append({
+                "transaction_id": tx.id,
+                "date": tx.date.isoformat() if tx.date else None,
+                "amount": float(tx.amount) if tx.amount else 0,
+                "category_field": tx.category,
+                "description": tx.description or tx.remarks,
+                "mapped_to_id": cat_id,
+                "mapped_to_name": cat_name,
+                "match_method": method,
+            })
+
+            if not dry_run:
+                tx.budget_item_id = cat_id
+                updated_count += 1
+        else:
+            unmatched.append({
+                "transaction_id": tx.id,
+                "date": tx.date.isoformat() if tx.date else None,
+                "amount": float(tx.amount) if tx.amount else 0,
+                "category_field": tx.category,
+                "description": tx.description or tx.remarks,
+            })
+
+    if not dry_run and updated_count > 0:
+        db.commit()
+
+    # Group mappings by category for summary
+    category_summary = {}
+    for m in mappings:
+        name = m["mapped_to_name"]
+        if name not in category_summary:
+            category_summary[name] = {"count": 0, "total_amount": 0}
+        category_summary[name]["count"] += 1
+        category_summary[name]["total_amount"] += m["amount"]
+
+    return {
+        "dry_run": dry_run,
+        "project_id": project_id,
+        "total_unmapped": len(unmapped_txs),
+        "total_matched": len(mappings),
+        "total_unmatched": len(unmatched),
+        "updated": updated_count,
+        "category_summary": category_summary,
+        "mappings": mappings,
+        "unmatched": unmatched,
+    }
+
+
+@app.put("/admin/bulk-assign-budget")
+def bulk_assign_budget(
+    payload: schemas.BulkAssignBudget,
+    db: Session = Depends(get_db),
+):
+    """Bulk-assign a budget category to multiple transactions."""
+    if not payload.transaction_ids:
+        raise HTTPException(status_code=400, detail="transaction_ids is required")
+
+    category = db.query(models.BudgetCategory).filter(
+        models.BudgetCategory.id == payload.budget_category_id
+    ).first()
+    if not category:
+        raise HTTPException(status_code=404, detail="Budget category not found")
+
+    updated = db.query(models.Transaction).filter(
+        models.Transaction.id.in_(payload.transaction_ids)
+    ).update({models.Transaction.budget_item_id: payload.budget_category_id}, synchronize_session="fetch")
+
+    db.commit()
+
+    return {"updated": updated, "budget_category_id": payload.budget_category_id, "category_name": category.category_name}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=8000)

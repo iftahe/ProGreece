@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { getBudgetReport, getBudgetTimeline, updateBudgetCategory, getTransactions } from '../api';
+import { getBudgetReport, getBudgetTimeline, updateBudgetCategory, getTransactions, runBudgetMapper, bulkAssignBudget, getBudgetCategories } from '../api';
 import { useProject } from '../contexts/ProjectContext';
 import { PencilIcon, CheckIcon, XIcon, EmptyStateIcon, CalendarPlanIcon, TimelineIcon, TableIcon } from '../components/Icons';
 import BudgetPlanEditor from '../components/BudgetPlanEditor';
@@ -134,6 +134,321 @@ const TimelineBar = ({ category, allMonths, maxBudget }) => {
                     </p>
                 )}
             </div>
+        </div>
+    );
+};
+
+// --- Budget Mapper Panel ---
+const BudgetMapperPanel = ({ projectId, onMappingApplied }) => {
+    const [expanded, setExpanded] = useState(false);
+    const [loading, setLoading] = useState(false);
+    const [applying, setApplying] = useState(false);
+    const [result, setResult] = useState(null);
+    const [error, setError] = useState(null);
+    const [scanMessage, setScanMessage] = useState(null);
+    const [selectedIds, setSelectedIds] = useState(new Set());
+    const [categories, setCategories] = useState([]);
+    const [assignCategoryId, setAssignCategoryId] = useState('');
+    const [assigning, setAssigning] = useState(false);
+
+    const handlePreview = async () => {
+        setLoading(true);
+        setError(null);
+        setResult(null);
+        setScanMessage(null);
+        try {
+            const data = await runBudgetMapper(projectId, { dryRun: true });
+            setResult(data);
+            setScanMessage('Scan complete');
+            setTimeout(() => setScanMessage(null), 3000);
+        } catch (err) {
+            console.error('Budget mapper error:', err);
+            setError(`Failed to scan transactions: ${err.response?.data?.detail || err.message}`);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleApply = async () => {
+        setApplying(true);
+        setError(null);
+        try {
+            const data = await runBudgetMapper(projectId, { dryRun: false });
+            setResult(data);
+            if (data.updated > 0) {
+                onMappingApplied();
+            }
+        } catch (err) {
+            setError('Failed to apply mappings');
+        } finally {
+            setApplying(false);
+        }
+    };
+
+    useEffect(() => {
+        if (projectId) {
+            getBudgetCategories(projectId).then(setCategories).catch(() => {});
+        }
+    }, [projectId]);
+
+    const toggleSelect = (id) => {
+        setSelectedIds(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id); else next.add(id);
+            return next;
+        });
+    };
+
+    const toggleSelectAll = () => {
+        if (!result?.unmatched) return;
+        const allIds = result.unmatched.map(u => u.transaction_id);
+        setSelectedIds(prev => prev.size === allIds.length ? new Set() : new Set(allIds));
+    };
+
+    const handleBulkAssign = async () => {
+        if (!assignCategoryId || selectedIds.size === 0) return;
+        setAssigning(true);
+        setError(null);
+        try {
+            await bulkAssignBudget([...selectedIds], Number(assignCategoryId));
+            setSelectedIds(new Set());
+            setAssignCategoryId('');
+            await handlePreview();
+            onMappingApplied();
+        } catch (err) {
+            setError(`Failed to assign: ${err.response?.data?.detail || err.message}`);
+        } finally {
+            setAssigning(false);
+        }
+    };
+
+    const methodLabel = (method) => {
+        const labels = {
+            exact_category: 'Exact match',
+            category_contains: 'Category contains',
+            description_contains: 'Description match',
+            remarks_contains: 'Remarks match',
+            keyword_match: 'Keyword match',
+        };
+        return labels[method] || method;
+    };
+
+    return (
+        <div className="card overflow-hidden">
+            <button
+                onClick={() => { setExpanded(!expanded); if (!expanded && !result) handlePreview(); }}
+                className="w-full flex items-center justify-between px-6 py-3 bg-amber-50 hover:bg-amber-100 transition-colors border-b border-amber-200"
+            >
+                <div className="flex items-center gap-2">
+                    <span className="text-amber-600 font-medium text-sm">Unmapped Transaction Scanner</span>
+                    <span className="text-xs text-amber-500">Map older transactions to budget categories</span>
+                </div>
+                <svg className={cn("w-4 h-4 text-amber-600 transition-transform", expanded && "rotate-180")} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+            </button>
+
+            {expanded && (
+                <div className="px-6 py-4 space-y-4">
+                    {loading && (
+                        <div className="text-center py-6">
+                            <div className="skeleton h-5 w-48 mx-auto mb-2" />
+                            <p className="text-xs text-gray-400">Scanning transactions...</p>
+                        </div>
+                    )}
+
+                    {error && (
+                        <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-sm text-rose-700">{error}</div>
+                    )}
+
+                    {result && !loading && (
+                        <>
+                            {/* Summary */}
+                            <div className="grid grid-cols-3 gap-3">
+                                <div className="bg-gray-50 rounded-lg p-3 text-center">
+                                    <p className="text-2xl font-bold text-gray-900">{result.total_unmapped}</p>
+                                    <p className="text-xs text-gray-500">Unmapped</p>
+                                </div>
+                                <div className="bg-emerald-50 rounded-lg p-3 text-center">
+                                    <p className="text-2xl font-bold text-emerald-700">{result.total_matched}</p>
+                                    <p className="text-xs text-emerald-600">Can be mapped</p>
+                                </div>
+                                <div className="bg-amber-50 rounded-lg p-3 text-center">
+                                    <p className="text-2xl font-bold text-amber-700">{result.total_unmatched}</p>
+                                    <p className="text-xs text-amber-600">No match found</p>
+                                </div>
+                            </div>
+
+                            {/* Applied confirmation */}
+                            {!result.dry_run && result.updated > 0 && (
+                                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700 font-medium">
+                                    Successfully mapped {result.updated} transactions to budget categories. Budget report has been refreshed.
+                                </div>
+                            )}
+
+                            {/* Category breakdown */}
+                            {Object.keys(result.category_summary).length > 0 && (
+                                <div>
+                                    <h4 className="text-sm font-medium text-gray-700 mb-2">
+                                        {result.dry_run ? 'Proposed mappings by category:' : 'Mapped by category:'}
+                                    </h4>
+                                    <div className="space-y-1">
+                                        {Object.entries(result.category_summary).map(([name, data]) => (
+                                            <div key={name} className="flex items-center justify-between text-sm py-1 px-3 bg-gray-50 rounded">
+                                                <span className="text-gray-700 font-medium">{name}</span>
+                                                <span className="text-gray-500">
+                                                    {data.count} tx &middot; {formatEUR(data.total_amount)}
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Detailed mappings table */}
+                            {result.dry_run && result.mappings.length > 0 && (
+                                <div>
+                                    <h4 className="text-sm font-medium text-gray-700 mb-2">Transaction details:</h4>
+                                    <div className="max-h-60 overflow-auto border border-gray-200 rounded-lg">
+                                        <table className="min-w-full text-xs">
+                                            <thead className="bg-slate-50 sticky top-0">
+                                                <tr>
+                                                    <th className="px-3 py-2 text-left text-gray-500">Date</th>
+                                                    <th className="px-3 py-2 text-left text-gray-500">Description</th>
+                                                    <th className="px-3 py-2 text-right text-gray-500">Amount</th>
+                                                    <th className="px-3 py-2 text-left text-gray-500">Maps To</th>
+                                                    <th className="px-3 py-2 text-left text-gray-500">Method</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-100">
+                                                {result.mappings.map(m => (
+                                                    <tr key={m.transaction_id} className="hover:bg-gray-50">
+                                                        <td className="px-3 py-1.5 whitespace-nowrap text-gray-600">
+                                                            {m.date ? new Date(m.date).toLocaleDateString('en-GB') : '-'}
+                                                        </td>
+                                                        <td className="px-3 py-1.5 text-gray-600 max-w-[200px] truncate">
+                                                            {m.description || m.category_field || '-'}
+                                                        </td>
+                                                        <td className="px-3 py-1.5 text-right font-medium text-gray-900 amount">
+                                                            {formatEUR(m.amount)}
+                                                        </td>
+                                                        <td className="px-3 py-1.5">
+                                                            <span className="inline-flex px-2 py-0.5 bg-primary-50 text-primary-700 rounded text-xs font-medium">
+                                                                {m.mapped_to_name}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-3 py-1.5 text-gray-400">{methodLabel(m.match_method)}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Unmatched transactions with bulk assign */}
+                            {result.unmatched.length > 0 && (
+                                <div>
+                                    <h4 className="text-sm font-medium text-amber-700 mb-2">
+                                        Unmatched transactions — select and assign a budget category:
+                                    </h4>
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <select
+                                            value={assignCategoryId}
+                                            onChange={e => setAssignCategoryId(e.target.value)}
+                                            className="input text-xs py-1.5 max-w-xs"
+                                        >
+                                            <option value="">Select budget category...</option>
+                                            {categories.map(c => (
+                                                <option key={c.id} value={c.id}>{c.category_name}</option>
+                                            ))}
+                                        </select>
+                                        <button
+                                            onClick={handleBulkAssign}
+                                            disabled={assigning || !assignCategoryId || selectedIds.size === 0}
+                                            className="btn-primary text-xs py-1.5"
+                                        >
+                                            {assigning ? 'Assigning...' : `Assign Selected (${selectedIds.size})`}
+                                        </button>
+                                    </div>
+                                    <div className="max-h-60 overflow-auto border border-amber-200 rounded-lg">
+                                        <table className="min-w-full text-xs">
+                                            <thead className="bg-amber-50 sticky top-0">
+                                                <tr>
+                                                    <th className="px-2 py-2 text-center">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={selectedIds.size === result.unmatched.length && result.unmatched.length > 0}
+                                                            onChange={toggleSelectAll}
+                                                            className="rounded border-gray-300"
+                                                        />
+                                                    </th>
+                                                    <th className="px-3 py-2 text-left text-gray-500">Date</th>
+                                                    <th className="px-3 py-2 text-left text-gray-500">Category</th>
+                                                    <th className="px-3 py-2 text-left text-gray-500">Description</th>
+                                                    <th className="px-3 py-2 text-right text-gray-500">Amount</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-amber-100">
+                                                {result.unmatched.map(u => (
+                                                    <tr key={u.transaction_id} className={cn("hover:bg-amber-50/50", selectedIds.has(u.transaction_id) && "bg-amber-50")}>
+                                                        <td className="px-2 py-1.5 text-center">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={selectedIds.has(u.transaction_id)}
+                                                                onChange={() => toggleSelect(u.transaction_id)}
+                                                                className="rounded border-gray-300"
+                                                            />
+                                                        </td>
+                                                        <td className="px-3 py-1.5 whitespace-nowrap text-gray-600">
+                                                            {u.date ? new Date(u.date).toLocaleDateString('en-GB') : '-'}
+                                                        </td>
+                                                        <td className="px-3 py-1.5 text-gray-500 max-w-[120px] truncate">
+                                                            {u.category_field || '-'}
+                                                        </td>
+                                                        <td className="px-3 py-1.5 text-gray-600 max-w-[200px] truncate">
+                                                            {u.description || '-'}
+                                                        </td>
+                                                        <td className="px-3 py-1.5 text-right font-medium text-gray-900 amount">
+                                                            {formatEUR(u.amount)}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Action buttons */}
+                            <div className="flex items-center gap-3 pt-2">
+                                {result.dry_run && result.total_matched > 0 && (
+                                    <button
+                                        onClick={handleApply}
+                                        disabled={applying}
+                                        className="btn-primary text-sm"
+                                    >
+                                        {applying ? 'Applying...' : `Apply ${result.total_matched} Mappings`}
+                                    </button>
+                                )}
+                                <button
+                                    onClick={handlePreview}
+                                    disabled={loading}
+                                    className="btn-secondary text-sm"
+                                >
+                                    {loading ? 'Scanning...' : 'Re-scan'}
+                                </button>
+                                {scanMessage && (
+                                    <span className="text-sm text-emerald-600 font-medium animate-pulse">{scanMessage}</span>
+                                )}
+                                {result.total_unmapped === 0 && (
+                                    <span className="text-sm text-emerald-600 font-medium">All transactions are mapped!</span>
+                                )}
+                            </div>
+                        </>
+                    )}
+                </div>
+            )}
         </div>
     );
 };
@@ -307,6 +622,11 @@ const BudgetReport = () => {
                 )}>
                     {message.text}
                 </div>
+            )}
+
+            {/* Budget Mapper Panel */}
+            {selectedProjectId && (
+                <BudgetMapperPanel projectId={selectedProjectId} onMappingApplied={loadReportData} />
             )}
 
             {!initialLoading && reportData.length === 0 && selectedProjectId && (

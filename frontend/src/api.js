@@ -206,4 +206,19 @@ export const createDirectToOwnerPayment = async (apartmentId, data) => {
     return response.data;
 };
 
+// --- Admin: Bulk Budget Mapper ---
+
+export const runBudgetMapper = async (projectId, { dryRun = true } = {}) => {
+    const response = await api.post(`/admin/budget-mapper/${projectId}?dry_run=${dryRun}`);
+    return response.data;
+};
+
+export const bulkAssignBudget = async (transactionIds, budgetCategoryId) => {
+    const response = await api.put('/admin/bulk-assign-budget', {
+        transaction_ids: transactionIds,
+        budget_category_id: budgetCategoryId,
+    });
+    return response.data;
+};
+
 export default api;

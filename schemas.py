@@ -88,6 +88,9 @@ class BudgetCategory(BudgetCategoryBase):
     class Config:
         from_attributes = True
 
+class BulkAssignBudget(BaseModel):
+    transaction_ids: List[int]
+    budget_category_id: int
 
 # --- Payment Method Enum ---
 class PaymentMethodEnum(str, Enum):
