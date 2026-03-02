@@ -1,18 +1,31 @@
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Query
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Query, Form
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, text
 from typing import List, Optional
 from datetime import datetime
+from decimal import Decimal
 from fastapi.middleware.cors import CORSMiddleware
 import json
 import os
 import models, schemas
 import services.budget_report_service
 import services.forecast_service
+from services.export_service import export_to_excel
+from services.audit_service import log_audit
 from database import SessionLocal, engine, DB_NAME, IS_RENDER
 
 # Create tables (only if they don't exist)
 models.Base.metadata.create_all(bind=engine)
+
+# Create performance indexes
+with engine.connect() as conn:
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_tx_project_date ON transactions(project_id, date)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_tx_status_date ON transactions(status, date)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_tx_customer ON transactions(customer_id_fk)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_tx_invoice ON transactions(invoice_id)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_tx_counterparty ON transactions(counterparty_id)"))
+    conn.commit()
 
 app = FastAPI()
 
@@ -198,8 +211,19 @@ def create_transaction(transaction: schemas.TransactionCreate, db: Session = Dep
     transaction_data['vat_rate'] = vat_rate
     db_transaction = models.Transaction(**transaction_data)
     db.add(db_transaction)
+
+    # Auto-compute VAT and withholding amounts
+    _vat_rate = Decimal(str(vat_rate)) if vat_rate else Decimal('0')
+    _withholding_rate = Decimal(str(transaction.withholding_rate)) if transaction.withholding_rate else Decimal('0')
+    _amount = Decimal(str(transaction.amount)) if transaction.amount else Decimal('0')
+    db_transaction.vat_amount = _amount * _vat_rate
+    db_transaction.withholding_amount = _amount * _withholding_rate
+
     db.commit()
     db.refresh(db_transaction)
+
+    # Audit log
+    log_audit(db, "transaction", db_transaction.id, "create", None, transaction.dict())
 
     # Feature 3: Upsert AccountCategoryMapping
     _upsert_account_category_mapping(db, db_transaction)
@@ -211,6 +235,9 @@ def update_transaction(transaction_id: int, transaction: schemas.TransactionCrea
     db_transaction = db.query(models.Transaction).filter(models.Transaction.id == transaction_id).first()
     if not db_transaction:
         raise HTTPException(status_code=404, detail="Transaction not found")
+
+    # Capture old data before update
+    old_data = {c.name: str(getattr(db_transaction, c.name)) for c in models.Transaction.__table__.columns}
 
     # Handle VAT logic
     vat_rate = transaction.vat_rate or 0
@@ -229,8 +256,18 @@ def update_transaction(transaction_id: int, transaction: schemas.TransactionCrea
     for key, value in transaction_data.items():
         setattr(db_transaction, key, value)
 
+    # Auto-compute VAT and withholding amounts
+    _vat_rate = Decimal(str(vat_rate)) if vat_rate else Decimal('0')
+    _withholding_rate = Decimal(str(transaction.withholding_rate)) if transaction.withholding_rate else Decimal('0')
+    _amount = Decimal(str(transaction.amount)) if transaction.amount else Decimal('0')
+    db_transaction.vat_amount = _amount * _vat_rate
+    db_transaction.withholding_amount = _amount * _withholding_rate
+
     db.commit()
     db.refresh(db_transaction)
+
+    # Audit log
+    log_audit(db, "transaction", transaction_id, "update", old_data, transaction.dict())
 
     # Feature 3: Upsert AccountCategoryMapping
     _upsert_account_category_mapping(db, db_transaction)
@@ -242,9 +279,16 @@ def delete_transaction(transaction_id: int, db: Session = Depends(get_db)):
     db_transaction = db.query(models.Transaction).filter(models.Transaction.id == transaction_id).first()
     if not db_transaction:
         raise HTTPException(status_code=404, detail="Transaction not found")
-    
+
+    # Capture old data before delete
+    old_data = {c.name: str(getattr(db_transaction, c.name)) for c in models.Transaction.__table__.columns}
+
     db.delete(db_transaction)
     db.commit()
+
+    # Audit log (entity_id is still valid as a reference)
+    log_audit(db, "transaction", transaction_id, "delete", old_data, None)
+
     return {"message": "Transaction deleted successfully"}
 
 # --- דוחות ותקציב ---
@@ -265,6 +309,51 @@ def get_cash_flow_forecast(project_id: int, db: Session = Depends(get_db)):
         return services.forecast_service.generate_cash_flow_forecast(db, project_id)
     except Exception as e:
         print(f"Error generating cash flow forecast: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/reports/forecast/company")
+def get_company_forecast(format: str = Query(None), db: Session = Depends(get_db)):
+    """
+    Company-wide 12-month consolidated cash flow forecast.
+
+    Returns a 12-month forward window (from today) across all active projects,
+    with monthly inflows, outflows, net, cumulative_cash and a cash_buffer_alert flag.
+    """
+    try:
+        forecast_result = services.forecast_service.generate_company_forecast(db)
+        if format == "xlsx":
+            rows = forecast_result if isinstance(forecast_result, list) else forecast_result.get("rows", [])
+            buf = export_to_excel("Company Forecast", rows, None, None)
+            return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                     headers={"Content-Disposition": "attachment; filename=Company Forecast.xlsx"})
+        return forecast_result
+    except Exception as e:
+        print(f"Error generating company forecast: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/reports/forecast/projects")
+def get_projects_forecast(format: str = Query(None), db: Session = Depends(get_db)):
+    """
+    Per-project 12-month cash flow forecast comparison.
+
+    Returns a 12-month forward window (from today) broken down per project,
+    including next_3_months_net, next_6_months_net, next_12_months_net and
+    lowest_cash_point for each project.
+    """
+    try:
+        forecast_result = services.forecast_service.generate_projects_forecast(db)
+        if format == "xlsx":
+            rows = forecast_result if isinstance(forecast_result, list) else forecast_result.get("rows", [])
+            buf = export_to_excel("Projects Forecast", rows, None, None)
+            return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                     headers={"Content-Disposition": "attachment; filename=Projects Forecast.xlsx"})
+        return forecast_result
+    except Exception as e:
+        print(f"Error generating projects forecast: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -1246,6 +1335,823 @@ def bulk_assign_budget(
     db.commit()
 
     return {"updated": updated, "budget_category_id": payload.budget_category_id, "category_name": category.category_name}
+
+
+# --- Counterparties ---
+
+@app.get("/counterparties/", response_model=List[schemas.Counterparty])
+def get_counterparties(db: Session = Depends(get_db)):
+    return db.query(models.Counterparty).all()
+
+@app.post("/counterparties/", response_model=schemas.Counterparty)
+def create_counterparty(counterparty: schemas.CounterpartyCreate, db: Session = Depends(get_db)):
+    db_counterparty = models.Counterparty(**counterparty.dict())
+    db.add(db_counterparty)
+    db.commit()
+    db.refresh(db_counterparty)
+    return db_counterparty
+
+@app.put("/counterparties/{counterparty_id}", response_model=schemas.Counterparty)
+def update_counterparty(counterparty_id: int, counterparty: schemas.CounterpartyCreate, db: Session = Depends(get_db)):
+    db_counterparty = db.query(models.Counterparty).filter(models.Counterparty.id == counterparty_id).first()
+    if not db_counterparty:
+        raise HTTPException(status_code=404, detail="Counterparty not found")
+    for key, value in counterparty.dict().items():
+        setattr(db_counterparty, key, value)
+    db.commit()
+    db.refresh(db_counterparty)
+    return db_counterparty
+
+@app.delete("/counterparties/{counterparty_id}")
+def delete_counterparty(counterparty_id: int, db: Session = Depends(get_db)):
+    db_counterparty = db.query(models.Counterparty).filter(models.Counterparty.id == counterparty_id).first()
+    if not db_counterparty:
+        raise HTTPException(status_code=404, detail="Counterparty not found")
+    db.delete(db_counterparty)
+    db.commit()
+    return {"ok": True}
+
+
+# --- Customers ---
+
+@app.get("/customers/", response_model=List[schemas.Customer])
+def get_customers(db: Session = Depends(get_db)):
+    return db.query(models.Customer).all()
+
+@app.post("/customers/", response_model=schemas.Customer)
+def create_customer(customer: schemas.CustomerCreate, db: Session = Depends(get_db)):
+    db_customer = models.Customer(**customer.dict())
+    db.add(db_customer)
+    db.commit()
+    db.refresh(db_customer)
+    return db_customer
+
+@app.put("/customers/{customer_id}", response_model=schemas.Customer)
+def update_customer(customer_id: int, customer: schemas.CustomerCreate, db: Session = Depends(get_db)):
+    db_customer = db.query(models.Customer).filter(models.Customer.id == customer_id).first()
+    if not db_customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    for key, value in customer.dict().items():
+        setattr(db_customer, key, value)
+    db.commit()
+    db.refresh(db_customer)
+    return db_customer
+
+@app.delete("/customers/{customer_id}")
+def delete_customer(customer_id: int, db: Session = Depends(get_db)):
+    db_customer = db.query(models.Customer).filter(models.Customer.id == customer_id).first()
+    if not db_customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    db.delete(db_customer)
+    db.commit()
+    return {"ok": True}
+
+
+# --- Invoices ---
+
+@app.post("/invoices/", response_model=schemas.Invoice)
+def create_invoice(invoice: schemas.InvoiceCreate, db: Session = Depends(get_db)):
+    db_invoice = models.Invoice(**invoice.dict())
+    db.add(db_invoice)
+    db.commit()
+    db.refresh(db_invoice)
+    # Write audit log
+    log = models.AuditLog(
+        entity_type="invoice",
+        entity_id=db_invoice.id,
+        action="create",
+        diff_json=json.dumps(invoice.dict(), default=str)
+    )
+    db.add(log)
+    db.commit()
+    return db_invoice
+
+@app.get("/invoices/")
+def get_invoices(
+    project_id: Optional[int] = None,
+    customer_id: Optional[int] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    query = db.query(models.Invoice)
+    if project_id:
+        query = query.filter(models.Invoice.project_id == project_id)
+    if customer_id:
+        query = query.filter(models.Invoice.customer_id == customer_id)
+    if date_from:
+        query = query.filter(models.Invoice.invoice_date >= date_from)
+    if date_to:
+        query = query.filter(models.Invoice.invoice_date <= date_to)
+    invoices = query.all()
+    # Return with customer/counterparty names
+    result = []
+    for inv in invoices:
+        item = {
+            "id": inv.id,
+            "project_id": inv.project_id,
+            "customer_id": inv.customer_id,
+            "counterparty_id": inv.counterparty_id,
+            "invoice_number": inv.invoice_number,
+            "invoice_date": str(inv.invoice_date) if inv.invoice_date else None,
+            "invoice_value": float(inv.invoice_value) if inv.invoice_value else 0,
+            "currency": inv.currency,
+            "remarks": inv.remarks,
+            "created_at": str(inv.created_at) if inv.created_at else None,
+        }
+        # Add linked transaction total
+        linked_txs = db.query(models.Transaction).filter(models.Transaction.invoice_id == inv.id).all()
+        item["transactions_value"] = float(sum(tx.amount or 0 for tx in linked_txs))
+        item["balance"] = item["invoice_value"] - item["transactions_value"]
+        result.append(item)
+    return result
+
+@app.put("/invoices/{invoice_id}", response_model=schemas.Invoice)
+def update_invoice(invoice_id: int, invoice: schemas.InvoiceCreate, db: Session = Depends(get_db)):
+    db_invoice = db.query(models.Invoice).filter(models.Invoice.id == invoice_id).first()
+    if not db_invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    old_data = {c.name: str(getattr(db_invoice, c.name)) for c in models.Invoice.__table__.columns}
+    for key, value in invoice.dict().items():
+        setattr(db_invoice, key, value)
+    db.commit()
+    db.refresh(db_invoice)
+    log = models.AuditLog(
+        entity_type="invoice",
+        entity_id=invoice_id,
+        action="update",
+        diff_json=json.dumps({"old": old_data, "new": invoice.dict()}, default=str)
+    )
+    db.add(log)
+    db.commit()
+    return db_invoice
+
+@app.delete("/invoices/{invoice_id}")
+def delete_invoice(invoice_id: int, db: Session = Depends(get_db)):
+    db_invoice = db.query(models.Invoice).filter(models.Invoice.id == invoice_id).first()
+    if not db_invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    log = models.AuditLog(
+        entity_type="invoice",
+        entity_id=invoice_id,
+        action="delete",
+        diff_json=json.dumps({"invoice_number": db_invoice.invoice_number}, default=str)
+    )
+    db.add(log)
+    db.delete(db_invoice)
+    db.commit()
+    return {"ok": True}
+
+@app.post("/transactions/{transaction_id}/link-invoice")
+def link_invoice_to_transaction(transaction_id: int, invoice_id: int, db: Session = Depends(get_db)):
+    tx = db.query(models.Transaction).filter(models.Transaction.id == transaction_id).first()
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    invoice = db.query(models.Invoice).filter(models.Invoice.id == invoice_id).first()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    tx.invoice_id = invoice_id
+    db.commit()
+    return {"ok": True, "transaction_id": transaction_id, "invoice_id": invoice_id}
+
+
+# --- Reports ---
+
+@app.get("/reports/invoices")
+def get_invoice_report(
+    project_id: Optional[int] = None,
+    customer_id: Optional[int] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    format: str = Query(None),
+    db: Session = Depends(get_db)
+):
+    from decimal import Decimal as D
+    query = db.query(models.Invoice)
+    filters_applied = {}
+    if project_id:
+        query = query.filter(models.Invoice.project_id == project_id)
+        filters_applied["project_id"] = project_id
+    if customer_id:
+        query = query.filter(models.Invoice.customer_id == customer_id)
+        filters_applied["customer_id"] = customer_id
+    if date_from:
+        query = query.filter(models.Invoice.invoice_date >= date_from)
+        filters_applied["date_from"] = date_from
+    if date_to:
+        query = query.filter(models.Invoice.invoice_date <= date_to)
+        filters_applied["date_to"] = date_to
+
+    invoices = query.all()
+
+    # Group by customer
+    from collections import defaultdict
+    by_customer = defaultdict(lambda: {"invoice_value": D('0'), "transactions_value": D('0')})
+
+    for inv in invoices:
+        customer_name = "Unknown"
+        if inv.customer_id:
+            cust = db.query(models.Customer).filter(models.Customer.id == inv.customer_id).first()
+            if cust:
+                customer_name = cust.full_name
+
+        inv_value = D(str(inv.invoice_value)) if inv.invoice_value else D('0')
+        by_customer[customer_name]["invoice_value"] += inv_value
+
+        linked_txs = db.query(models.Transaction).filter(models.Transaction.invoice_id == inv.id).all()
+        tx_value = sum(D(str(tx.amount or 0)) for tx in linked_txs)
+        by_customer[customer_name]["transactions_value"] += tx_value
+
+    rows = []
+    total_inv = D('0')
+    total_tx = D('0')
+    for customer, vals in by_customer.items():
+        balance = vals["invoice_value"] - vals["transactions_value"]
+        rows.append({
+            "customer": customer,
+            "invoice_value": float(vals["invoice_value"]),
+            "transactions_value": float(vals["transactions_value"]),
+            "balance": float(balance)
+        })
+        total_inv += vals["invoice_value"]
+        total_tx += vals["transactions_value"]
+
+    result = {
+        "rows": rows,
+        "totals": {
+            "invoice_value": float(total_inv),
+            "transactions_value": float(total_tx),
+            "balance": float(total_inv - total_tx)
+        },
+        "drilldown_supported": True,
+        "filters_applied": filters_applied
+    }
+    if format == "xlsx":
+        buf = export_to_excel("Invoices Report", result["rows"], result.get("totals"), filters_applied)
+        return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                 headers={"Content-Disposition": "attachment; filename=Invoices Report.xlsx"})
+    return result
+
+
+# --- Report 1: P&L ---
+
+@app.get("/reports/pnl")
+def get_pnl_report(
+    project_id: Optional[int] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    status: Optional[str] = None,
+    format: str = Query(None),
+    db: Session = Depends(get_db)
+):
+    from decimal import Decimal as D
+    from collections import defaultdict
+
+    query = db.query(models.Transaction)
+    filters_applied = {}
+    if project_id:
+        query = query.filter(models.Transaction.project_id == project_id)
+        filters_applied["project_id"] = project_id
+    if date_from:
+        query = query.filter(models.Transaction.date >= date_from)
+        filters_applied["date_from"] = date_from
+    if date_to:
+        query = query.filter(models.Transaction.date <= date_to)
+        filters_applied["date_to"] = date_to
+    if status:
+        query = query.filter(models.Transaction.status == status)
+        filters_applied["status"] = status
+    else:
+        query = query.filter(models.Transaction.status == 'executed')
+
+    transactions = query.all()
+
+    # Group by category_id + counterparty_id
+    groups = defaultdict(lambda: {"trans_value": D('0'), "vat_value": D('0'), "withholding_value": D('0')})
+
+    for tx in transactions:
+        sign = D('1') if (tx.direction == 'in') else D('-1')
+        amount = D(str(tx.amount or 0))
+        vat = D(str(tx.vat_amount or 0))
+        withholding = D(str(tx.withholding_amount or 0))
+
+        key = (tx.budget_item_id, tx.counterparty_id)
+        groups[key]["trans_value"] += sign * amount
+        groups[key]["vat_value"] += sign * vat
+        groups[key]["withholding_value"] += sign * withholding
+
+    rows = []
+    total_trans = D('0')
+    total_vat = D('0')
+    total_withholding = D('0')
+
+    for (cat_id, cp_id), vals in groups.items():
+        cat = db.query(models.BudgetCategory).filter(models.BudgetCategory.id == cat_id).first() if cat_id else None
+        cp = db.query(models.Counterparty).filter(models.Counterparty.id == cp_id).first() if cp_id else None
+
+        vn = vals["trans_value"] - vals["vat_value"]
+        vn_wh = vn - vals["withholding_value"]
+
+        rows.append({
+            "category": cat.name if cat else "Unknown",
+            "counterparty": cp.name if cp else "Unknown",
+            "trans_value": float(vals["trans_value"]),
+            "vat_value": float(vals["vat_value"]),
+            "value_no_vat": float(vn),
+            "withholding_value": float(vals["withholding_value"]),
+            "value_no_vat_no_withholding": float(vn_wh)
+        })
+        total_trans += vals["trans_value"]
+        total_vat += vals["vat_value"]
+        total_withholding += vals["withholding_value"]
+
+    total_vn = total_trans - total_vat
+    result = {
+        "rows": rows,
+        "totals": {
+            "trans_value": float(total_trans),
+            "vat_value": float(total_vat),
+            "value_no_vat": float(total_vn),
+            "withholding_value": float(total_withholding),
+            "value_no_vat_no_withholding": float(total_vn - total_withholding)
+        },
+        "drilldown_supported": True,
+        "filters_applied": filters_applied
+    }
+    if format == "xlsx":
+        buf = export_to_excel("PnL Report", result["rows"], result.get("totals"), filters_applied)
+        return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                 headers={"Content-Disposition": "attachment; filename=PnL Report.xlsx"})
+    return result
+
+
+# --- Report 2: Plan vs Actual (enhanced) ---
+
+@app.get("/reports/plan-vs-actual")
+def get_plan_vs_actual_report(
+    project_id: Optional[int] = None,
+    status: Optional[str] = None,
+    format: str = Query(None),
+    db: Session = Depends(get_db)
+):
+    from decimal import Decimal as D
+    filters_applied = {}
+    if project_id:
+        filters_applied["project_id"] = project_id
+
+    # Get budget categories for this project
+    categories_query = db.query(models.BudgetCategory)
+    if project_id:
+        categories_query = categories_query.filter(models.BudgetCategory.project_id == project_id)
+    categories = categories_query.all()
+
+    rows = []
+    total_planned = D('0')
+    total_actual = D('0')
+    total_vat = D('0')
+    total_withholding = D('0')
+
+    for cat in categories:
+        planned = D(str(cat.planned_amount or 0))
+
+        tx_query = db.query(models.Transaction).filter(
+            models.Transaction.budget_item_id == cat.id,
+            models.Transaction.direction == 'out'
+        )
+        if status:
+            tx_query = tx_query.filter(models.Transaction.status == status)
+        else:
+            tx_query = tx_query.filter(models.Transaction.status == 'executed')
+
+        txs = tx_query.all()
+        actual = sum(D(str(tx.amount or 0)) for tx in txs)
+        vat = sum(D(str(tx.vat_amount or 0)) for tx in txs)
+        withholding = sum(D(str(tx.withholding_amount or 0)) for tx in txs)
+
+        rows.append({
+            "category": cat.name,
+            "planned": float(planned),
+            "actual": float(actual),
+            "variance": float(planned - actual),
+            "vat_amount": float(vat),
+            "withholding_amount": float(withholding)
+        })
+        total_planned += planned
+        total_actual += actual
+        total_vat += vat
+        total_withholding += withholding
+
+    result = {
+        "rows": rows,
+        "totals": {
+            "planned": float(total_planned),
+            "actual": float(total_actual),
+            "variance": float(total_planned - total_actual),
+            "vat_amount": float(total_vat),
+            "withholding_amount": float(total_withholding)
+        },
+        "drilldown_supported": True,
+        "filters_applied": filters_applied
+    }
+    if format == "xlsx":
+        buf = export_to_excel("Plan vs Actual", result["rows"], result.get("totals"), filters_applied)
+        return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                 headers={"Content-Disposition": "attachment; filename=Plan vs Actual.xlsx"})
+    return result
+
+
+# --- Report 4: Customer Transactions ---
+
+@app.get("/reports/customer-transactions")
+def get_customer_transactions_report(
+    project_id: Optional[int] = None,
+    customer_id: Optional[int] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    format: str = Query(None),
+    db: Session = Depends(get_db)
+):
+    from decimal import Decimal as D
+
+    query = db.query(models.Transaction).filter(
+        models.Transaction.customer_id_fk != None,
+        models.Transaction.direction == 'in',
+        models.Transaction.status == 'executed'
+    )
+    filters_applied = {}
+    if project_id:
+        query = query.filter(models.Transaction.project_id == project_id)
+        filters_applied["project_id"] = project_id
+    if customer_id:
+        query = query.filter(models.Transaction.customer_id_fk == customer_id)
+        filters_applied["customer_id"] = customer_id
+    if date_from:
+        query = query.filter(models.Transaction.date >= date_from)
+        filters_applied["date_from"] = date_from
+    if date_to:
+        query = query.filter(models.Transaction.date <= date_to)
+        filters_applied["date_to"] = date_to
+
+    transactions = query.all()
+    total_amount = D('0')
+    rows = []
+
+    for tx in transactions:
+        cust = db.query(models.Customer).filter(models.Customer.id == tx.customer_id_fk).first() if tx.customer_id_fk else None
+        proj = db.query(models.Project).filter(models.Project.id == tx.project_id).first() if tx.project_id else None
+        apt = db.query(models.Apartment).filter(models.Apartment.id == tx.apartment_id).first() if hasattr(tx, 'apartment_id') and tx.apartment_id else None
+        amount = D(str(tx.amount or 0))
+        total_amount += amount
+        rows.append({
+            "customer": cust.full_name if cust else "Unknown",
+            "project": proj.name if proj else "Unknown",
+            "apartment": apt.apartment_number if apt else "",
+            "date": str(tx.date) if tx.date else "",
+            "amount": float(amount),
+            "description": tx.description or "",
+            "source_ref": tx.source_ref or ""
+        })
+
+    result = {
+        "rows": rows,
+        "totals": {"amount": float(total_amount)},
+        "drilldown_supported": False,
+        "filters_applied": filters_applied
+    }
+    if format == "xlsx":
+        buf = export_to_excel("Customer Transactions", result["rows"], result.get("totals"), filters_applied)
+        return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                 headers={"Content-Disposition": "attachment; filename=Customer Transactions.xlsx"})
+    return result
+
+
+# --- Report 5: Customer Balance ---
+
+@app.get("/reports/customer-balance")
+def get_customer_balance_report(
+    project_id: Optional[int] = None,
+    customer_id: Optional[int] = None,
+    format: str = Query(None),
+    db: Session = Depends(get_db)
+):
+    from decimal import Decimal as D
+
+    apt_query = db.query(models.Apartment).filter(models.Apartment.customer_id != None)
+    filters_applied = {}
+    if project_id:
+        apt_query = apt_query.filter(models.Apartment.project_id == project_id)
+        filters_applied["project_id"] = project_id
+    if customer_id:
+        apt_query = apt_query.filter(models.Apartment.customer_id == customer_id)
+        filters_applied["customer_id"] = customer_id
+
+    apartments = apt_query.all()
+    rows = []
+    total_price = D('0')
+    total_received = D('0')
+
+    for apt in apartments:
+        cust = db.query(models.Customer).filter(models.Customer.id == apt.customer_id).first() if apt.customer_id else None
+        price = D(str(apt.sale_price or 0))
+
+        # Sum all customer payments for this apartment
+        payments = db.query(models.CustomerPayment).filter(
+            models.CustomerPayment.apartment_id == apt.id
+        ).all()
+        received = sum(D(str(p.amount or 0)) for p in payments)
+
+        remaining = price - received
+        pct_paid = float(received / price * 100) if price > 0 else 0
+
+        rows.append({
+            "customer": cust.full_name if cust else apt.customer_name or "Unknown",
+            "apartment": apt.apartment_number or apt.unit_number or str(apt.id),
+            "sale_price": float(price),
+            "received": float(received),
+            "remaining": float(remaining),
+            "pct_paid": round(pct_paid, 1)
+        })
+        total_price += price
+        total_received += received
+
+    result = {
+        "rows": rows,
+        "totals": {
+            "sale_price": float(total_price),
+            "received": float(total_received),
+            "remaining": float(total_price - total_received)
+        },
+        "drilldown_supported": True,
+        "filters_applied": filters_applied
+    }
+    if format == "xlsx":
+        buf = export_to_excel("Customer Balance", result["rows"], result.get("totals"), filters_applied)
+        return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                 headers={"Content-Disposition": "attachment; filename=Customer Balance.xlsx"})
+    return result
+
+
+# --- Report 8: Payments by Project ---
+
+@app.get("/reports/payments-by-project")
+def get_payments_by_project_report(
+    project_id: Optional[int] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    status: Optional[str] = None,
+    format: str = Query(None),
+    db: Session = Depends(get_db)
+):
+    from decimal import Decimal as D
+    from collections import defaultdict
+
+    query = db.query(models.Transaction).filter(models.Transaction.direction == 'out')
+    filters_applied = {}
+    if project_id:
+        query = query.filter(models.Transaction.project_id == project_id)
+        filters_applied["project_id"] = project_id
+    if date_from:
+        query = query.filter(models.Transaction.date >= date_from)
+        filters_applied["date_from"] = date_from
+    if date_to:
+        query = query.filter(models.Transaction.date <= date_to)
+        filters_applied["date_to"] = date_to
+    if status:
+        query = query.filter(models.Transaction.status == status)
+        filters_applied["status"] = status
+
+    transactions = query.all()
+
+    rows = []
+    total_amount = D('0')
+
+    for tx in transactions:
+        proj = db.query(models.Project).filter(models.Project.id == tx.project_id).first() if tx.project_id else None
+        cp = db.query(models.Counterparty).filter(models.Counterparty.id == tx.counterparty_id).first() if tx.counterparty_id else None
+        tx_date = tx.date
+        month = str(tx_date)[:7] if tx_date else ""
+        amount = D(str(tx.amount or 0))
+        total_amount += amount
+        rows.append({
+            "project": proj.name if proj else "Unknown",
+            "counterparty": cp.name if cp else (tx.supplier or "Unknown"),
+            "month": month,
+            "amount": float(amount),
+            "description": tx.description or ""
+        })
+
+    result = {
+        "rows": rows,
+        "totals": {"amount": float(total_amount)},
+        "drilldown_supported": False,
+        "filters_applied": filters_applied
+    }
+    if format == "xlsx":
+        buf = export_to_excel("Payments by Project", result["rows"], result.get("totals"), filters_applied)
+        return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                 headers={"Content-Disposition": "attachment; filename=Payments by Project.xlsx"})
+    return result
+
+
+# --- Report 9: VAT ---
+
+@app.get("/reports/vat")
+def get_vat_report(
+    project_id: Optional[int] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    format: str = Query(None),
+    db: Session = Depends(get_db)
+):
+    from decimal import Decimal as D
+
+    query = db.query(models.Transaction).filter(models.Transaction.vat_amount > 0)
+    filters_applied = {}
+    if project_id:
+        query = query.filter(models.Transaction.project_id == project_id)
+        filters_applied["project_id"] = project_id
+    if date_from:
+        query = query.filter(models.Transaction.date >= date_from)
+        filters_applied["date_from"] = date_from
+    if date_to:
+        query = query.filter(models.Transaction.date <= date_to)
+        filters_applied["date_to"] = date_to
+
+    transactions = query.all()
+    total_amount = D('0')
+    total_vat = D('0')
+    rows = []
+
+    for tx in transactions:
+        cp = db.query(models.Counterparty).filter(models.Counterparty.id == tx.counterparty_id).first() if tx.counterparty_id else None
+        amount = D(str(tx.amount or 0))
+        vat = D(str(tx.vat_amount or 0))
+        total_amount += amount
+        total_vat += vat
+        rows.append({
+            "counterparty": cp.name if cp else (tx.supplier or "Unknown"),
+            "description": tx.description or "",
+            "date": str(tx.date) if tx.date else "",
+            "amount": float(amount),
+            "vat_amount": float(vat)
+        })
+
+    result = {
+        "rows": rows,
+        "totals": {"amount": float(total_amount), "vat_amount": float(total_vat)},
+        "drilldown_supported": False,
+        "filters_applied": filters_applied
+    }
+    if format == "xlsx":
+        buf = export_to_excel("VAT Report", result["rows"], result.get("totals"), filters_applied)
+        return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                 headers={"Content-Disposition": "attachment; filename=VAT Report.xlsx"})
+    return result
+
+
+# --- Report 10: Withholding Tax ---
+
+@app.get("/reports/withholding")
+def get_withholding_report(
+    project_id: Optional[int] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    format: str = Query(None),
+    db: Session = Depends(get_db)
+):
+    from decimal import Decimal as D
+    from collections import defaultdict
+
+    query = db.query(models.Transaction).filter(models.Transaction.withholding_amount > 0)
+    filters_applied = {}
+    if project_id:
+        query = query.filter(models.Transaction.project_id == project_id)
+        filters_applied["project_id"] = project_id
+    if date_from:
+        query = query.filter(models.Transaction.date >= date_from)
+        filters_applied["date_from"] = date_from
+    if date_to:
+        query = query.filter(models.Transaction.date <= date_to)
+        filters_applied["date_to"] = date_to
+
+    transactions = query.all()
+
+    # Group by counterparty
+    by_cp = defaultdict(lambda: {"amount": D('0'), "withholding": D('0'), "rows": []})
+
+    for tx in transactions:
+        cp = db.query(models.Counterparty).filter(models.Counterparty.id == tx.counterparty_id).first() if tx.counterparty_id else None
+        cp_name = cp.name if cp else (tx.supplier or "Unknown")
+        amount = D(str(tx.amount or 0))
+        withholding = D(str(tx.withholding_amount or 0))
+        by_cp[cp_name]["amount"] += amount
+        by_cp[cp_name]["withholding"] += withholding
+        by_cp[cp_name]["rows"].append({
+            "counterparty": cp_name,
+            "description": tx.description or "",
+            "date": str(tx.date) if tx.date else "",
+            "amount": float(amount),
+            "withholding_amount": float(withholding)
+        })
+
+    rows = []
+    total_amount = D('0')
+    total_withholding = D('0')
+    for cp_name, data in by_cp.items():
+        rows.extend(data["rows"])
+        total_amount += data["amount"]
+        total_withholding += data["withholding"]
+
+    result = {
+        "rows": rows,
+        "totals": {"amount": float(total_amount), "withholding_amount": float(total_withholding)},
+        "drilldown_supported": False,
+        "filters_applied": filters_applied
+    }
+    if format == "xlsx":
+        buf = export_to_excel("Withholding Tax", result["rows"], result.get("totals"), filters_applied)
+        return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                 headers={"Content-Disposition": "attachment; filename=Withholding Tax.xlsx"})
+    return result
+
+
+@app.post("/imports/transactions")
+async def import_transactions(
+    file: UploadFile = File(...),
+    project_id: int = Form(...),
+    db: Session = Depends(get_db)
+):
+    """Import transactions from CSV or Excel file."""
+    # Read file content
+    content = await file.read()
+
+    # Parse CSV or Excel
+    if file.filename.endswith('.csv'):
+        import csv, io
+        reader = csv.DictReader(io.StringIO(content.decode('utf-8-sig')))
+        rows = list(reader)
+    else:
+        # Excel
+        import openpyxl, io as _io
+        wb = openpyxl.load_workbook(_io.BytesIO(content))
+        ws = wb.active
+        headers = [cell.value for cell in ws[1]]
+        rows = []
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            rows.append(dict(zip(headers, row)))
+
+    imported = 0
+    skipped = 0
+    errors = []
+
+    for i, row in enumerate(rows, 1):
+        try:
+            source_ref = row.get('source_ref') or row.get('Source Ref')
+
+            # Duplicate guard
+            if source_ref:
+                existing = db.query(models.Transaction).filter(
+                    models.Transaction.source_ref == source_ref
+                ).first()
+                if existing:
+                    skipped += 1
+                    continue
+
+            # Parse row
+            date_str = row.get('date') or row.get('Date')
+            amount_str = str(row.get('amount') or row.get('Amount') or '0')
+            direction = (row.get('direction') or row.get('Direction') or 'expense').lower()
+            description = row.get('description') or row.get('Description') or ''
+            status = (row.get('status') or row.get('Status') or 'Executed')
+
+            # Find category
+            category_name = row.get('category') or row.get('Category')
+            category = None
+            if category_name:
+                category = db.query(models.BudgetCategory).filter(
+                    models.BudgetCategory.project_id == project_id,
+                    models.BudgetCategory.category_name == category_name
+                ).first()
+
+            tx = models.Transaction(
+                project_id=project_id,
+                date=date_str,
+                amount=Decimal(amount_str.replace(',', '')),
+                direction=direction,
+                type=direction,
+                description=description,
+                status=status,
+                source_ref=source_ref,
+                budget_category_id=category.id if category else None,
+            )
+            db.add(tx)
+            db.flush()
+            imported += 1
+        except Exception as e:
+            errors.append({"row": i, "error": str(e)})
+
+    db.commit()
+    return {"imported": imported, "skipped": skipped, "errors": errors}
 
 
 if __name__ == "__main__":

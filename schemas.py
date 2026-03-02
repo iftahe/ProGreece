@@ -61,6 +61,16 @@ class TransactionBase(BaseModel):
     description: Optional[str] = None
     supplier: Optional[str] = None
     type: Optional[str] = None
+    # Phase 4 fields
+    vat_amount: Optional[Decimal] = None
+    withholding_amount: Optional[Decimal] = None
+    direction: Optional[str] = None
+    status: Optional[str] = None
+    counterparty_id: Optional[int] = None
+    customer_id_fk: Optional[int] = None
+    invoice_id: Optional[int] = None
+    source_ref: Optional[str] = None
+    currency: Optional[str] = "EUR"
 
 class TransactionCreate(TransactionBase):
     pass
@@ -179,5 +189,74 @@ class AccountCategoryMappingBase(BaseModel):
 class AccountCategoryMapping(AccountCategoryMappingBase):
     id: int
     last_used: Optional[datetime] = None
+    class Config:
+        from_attributes = True
+
+
+# --- Counterparty Schemas ---
+class CounterpartyBase(BaseModel):
+    name: str
+    vat_number: Optional[str] = None
+    default_category_id: Optional[int] = None
+
+class CounterpartyCreate(CounterpartyBase):
+    pass
+
+class Counterparty(CounterpartyBase):
+    id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    class Config:
+        from_attributes = True
+
+
+# --- Customer Schemas ---
+class CustomerBase(BaseModel):
+    full_name: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
+
+class CustomerCreate(CustomerBase):
+    pass
+
+class Customer(CustomerBase):
+    id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    class Config:
+        from_attributes = True
+
+
+# --- Invoice Schemas ---
+class InvoiceBase(BaseModel):
+    project_id: int
+    customer_id: Optional[int] = None
+    counterparty_id: Optional[int] = None
+    invoice_number: str
+    invoice_date: date
+    invoice_value: Decimal
+    currency: Optional[str] = "EUR"
+    remarks: Optional[str] = None
+
+class InvoiceCreate(InvoiceBase):
+    pass
+
+class Invoice(InvoiceBase):
+    id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    class Config:
+        from_attributes = True
+
+
+# --- AuditLog Schema ---
+class AuditLogEntry(BaseModel):
+    id: int
+    entity_type: str
+    entity_id: int
+    action: str
+    diff_json: Optional[str] = None
+    actor_user_id: Optional[int] = None
+    timestamp: Optional[datetime] = None
     class Config:
         from_attributes = True

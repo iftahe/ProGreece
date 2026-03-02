@@ -3,7 +3,7 @@ import {
     ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid,
     Tooltip, Legend, ResponsiveContainer, ReferenceLine
 } from 'recharts';
-import { getCashFlowForecast, getProjectKpiSummary } from '../api';
+import { getCashFlowForecast, getProjectKpiSummary, getProjectsForecast } from '../api';
 import { useProject } from '../contexts/ProjectContext';
 import { IncomeIcon, ExpenseIcon, NetFlowIcon, BalanceIcon, ApartmentsIcon, ShieldCheckIcon, CalendarPlanIcon } from '../components/Icons';
 import { cn, formatEUR, formatPercent } from '../lib/utils';
@@ -68,6 +68,8 @@ const Dashboard = () => {
     const [loading, setLoading] = useState(true);
     const [timeRange, setTimeRange] = useState('all');
     const [viewMode, setViewMode] = useState('monthly');
+    const [expectedCollections, setExpectedCollections] = useState(null);
+    const [collectionsLoading, setCollectionsLoading] = useState(false);
 
     useEffect(() => {
         if (selectedProjectId) {
@@ -94,6 +96,23 @@ const Dashboard = () => {
         } else {
             setLoading(false);
         }
+    }, [selectedProjectId]);
+
+    useEffect(() => {
+        setCollectionsLoading(true);
+        getProjectsForecast()
+            .then(response => {
+                const projects = response.data || [];
+                const total = projects
+                    .filter(p => !selectedProjectId || p.project_id === selectedProjectId)
+                    .reduce((sum, p) => sum + (p.unpaid_balance || 0), 0);
+                setExpectedCollections(total);
+            })
+            .catch(err => {
+                console.error("Failed to fetch forecast data", err);
+                setExpectedCollections(null);
+            })
+            .finally(() => setCollectionsLoading(false));
     }, [selectedProjectId]);
 
     // Compute totals & trends
@@ -170,7 +189,7 @@ const Dashboard = () => {
 
             {/* KPI Cards Row 1 - Cash Flow Summary */}
             {!loading && data.length > 0 && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                     <KpiCard icon={IncomeIcon} label={'Total Income'} value={formatEUR(totals.income)}
                         trend={incomeTrend} colorClass="text-income" bgClass="bg-emerald-50" />
                     <KpiCard icon={ExpenseIcon} label={'Total Expenses'} value={formatEUR(totals.expense)}
@@ -180,6 +199,13 @@ const Dashboard = () => {
                         bgClass={totals.net >= 0 ? 'bg-emerald-50' : 'bg-rose-50'} />
                     <KpiCard icon={BalanceIcon} label={'Current Balance'} value={formatEUR(balance)}
                         colorClass="text-primary-600" bgClass="bg-primary-50" />
+                    <KpiCard
+                        icon={CalendarPlanIcon}
+                        label={'Expected Collections'}
+                        value={collectionsLoading ? '...' : (expectedCollections !== null ? formatEUR(expectedCollections) : 'N/A')}
+                        colorClass="text-amber-600"
+                        bgClass="bg-amber-50"
+                    />
                 </div>
             )}
 

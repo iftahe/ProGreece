@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { getAccounts, createTransaction, getTransactions, deleteTransaction, updateTransaction, getBudgetCategories, getSuggestedCategory, getApartments } from "../api";
+import { getAccounts, createTransaction, getTransactions, deleteTransaction, updateTransaction, getBudgetCategories, getSuggestedCategory, getApartments, getCounterparties, importTransactions } from "../api";
 import { useProject } from '../contexts/ProjectContext';
 import { PencilIcon, TrashIcon, EmptyStateIcon, SearchIcon } from '../components/Icons';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -43,6 +43,14 @@ const Transactions = () => {
     // Apartment dropdown state
     const [projectApartments, setProjectApartments] = useState([]);
 
+    // Counterparties dropdown state
+    const [counterparties, setCounterparties] = useState([]);
+
+    // Import state
+    const importFileRef = useRef(null);
+    const [importLoading, setImportLoading] = useState(false);
+    const [importResult, setImportResult] = useState(null); // { type: 'success'|'error', text, errors? }
+
     const initialFormState = {
         date: new Date().toISOString().split('T')[0],
         amount: '',
@@ -54,6 +62,7 @@ const Transactions = () => {
         vat_rate: '0',
         status: 'Executed',
         apartment_id: '',
+        counterparty_id: '',
     };
 
     const [formData, setFormData] = useState(initialFormState);
@@ -137,6 +146,20 @@ const Transactions = () => {
         loadApartments();
     }, [formData.project_id]);
 
+    // Load counterparties once on mount
+    useEffect(() => {
+        const loadCounterparties = async () => {
+            try {
+                const data = await getCounterparties();
+                setCounterparties(Array.isArray(data) ? data : (data.items || []));
+            } catch (error) {
+                console.error("Failed to load counterparties", error);
+                setCounterparties([]);
+            }
+        };
+        loadCounterparties();
+    }, []);
+
     const loadData = async () => {
         try {
             const params = { skip: currentSkip, limit: PAGE_SIZE };
@@ -176,6 +199,7 @@ const Transactions = () => {
         setLoading(true);
         setMessage(null);
         try {
+            const statusToType = { 'Executed': 1, 'Planned': 2, 'Cancelled': 3 };
             const payload = {
                 date: formData.date,
                 amount: parseFloat(formData.amount),
@@ -185,8 +209,10 @@ const Transactions = () => {
                 from_account_id: formData.from_account_id ? parseInt(formData.from_account_id) : null,
                 to_account_id: formData.to_account_id ? parseInt(formData.to_account_id) : null,
                 apartment_id: formData.apartment_id ? parseInt(formData.apartment_id) : null,
+                counterparty_id: formData.counterparty_id ? parseInt(formData.counterparty_id) : null,
+                status: formData.status,
                 remarks: formData.description,
-                transaction_type: formData.status === 'Executed' ? 1 : 2
+                transaction_type: statusToType[formData.status] ?? 1,
             };
             if (editingId) {
                 await updateTransaction(editingId, payload);
@@ -233,8 +259,9 @@ const Transactions = () => {
             from_account_id: transaction.from_account_id || '',
             to_account_id: transaction.to_account_id || '',
             vat_rate: transaction.vat_rate || 0,
-            status: transaction.transaction_type === 1 ? 'Executed' : 'Planned',
+            status: transaction.transaction_type === 1 ? 'Executed' : (transaction.transaction_type === 3 ? 'Cancelled' : 'Planned'),
             apartment_id: transaction.apartment_id || '',
+            counterparty_id: transaction.counterparty_id || '',
         });
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
@@ -242,6 +269,34 @@ const Transactions = () => {
     const resetForm = () => {
         setEditingId(null);
         setFormData({ ...initialFormState, project_id: selectedProjectId || '' });
+    };
+
+    const handleImportFile = async (e) => {
+        const file = e.target.files[0];
+        if (!importFileRef.current) return;
+        importFileRef.current.value = '';
+        if (!file) return;
+        setImportLoading(true);
+        setImportResult(null);
+        try {
+            const projectId = filterProjectId || selectedProjectId || '';
+            const response = await importTransactions(projectId, file);
+            const data = response.data;
+            const imported = data.imported ?? data.created ?? 0;
+            const skipped  = data.skipped  ?? data.duplicates ?? 0;
+            const rowErrors = data.errors ?? [];
+            setImportResult({
+                type: rowErrors.length > 0 ? 'warning' : 'success',
+                text: `Imported ${imported} transaction${imported !== 1 ? 's' : ''}, skipped ${skipped} duplicate${skipped !== 1 ? 's' : ''}.`,
+                errors: rowErrors,
+            });
+            loadData();
+        } catch (error) {
+            const detail = error?.response?.data?.detail || 'Import failed. Please check the file format and try again.';
+            setImportResult({ type: 'error', text: detail, errors: [] });
+        } finally {
+            setImportLoading(false);
+        }
     };
 
     const cleanField = (val) => {
@@ -298,16 +353,65 @@ const Transactions = () => {
                     <h2 className="text-2xl font-bold text-gray-900">
                         {editingId ? 'Edit Transaction' : 'New Transaction'}
                     </h2>
-                    {editingId && (
-                        <button onClick={resetForm} className="text-sm text-expense hover:text-rose-700 font-medium">
-                            {'Cancel Edit'}
+                    <div className="flex items-center gap-3">
+                        {editingId && (
+                            <button onClick={resetForm} className="text-sm text-expense hover:text-rose-700 font-medium">
+                                {'Cancel Edit'}
+                            </button>
+                        )}
+                        <input
+                            ref={importFileRef}
+                            type="file"
+                            accept=".csv,.xlsx"
+                            className="hidden"
+                            onChange={handleImportFile}
+                        />
+                        <button
+                            type="button"
+                            disabled={importLoading}
+                            onClick={() => importFileRef.current && importFileRef.current.click()}
+                            className={cn(
+                                "inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border transition-colors",
+                                importLoading
+                                    ? "opacity-50 cursor-not-allowed border-gray-300 text-gray-400 bg-white"
+                                    : "border-primary-300 text-primary-700 bg-primary-50 hover:bg-primary-100"
+                            )}
+                        >
+                            {importLoading ? 'Importing...' : 'Import CSV / Excel'}
                         </button>
-                    )}
+                    </div>
                 </div>
 
                 {message && (
                     <div className={cn("p-4 mb-4 rounded-lg text-sm font-medium", message.type === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700')}>
                         {message.text}
+                    </div>
+                )}
+
+                {importResult && (
+                    <div className={cn(
+                        "p-4 mb-4 rounded-lg text-sm font-medium",
+                        importResult.type === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
+                        importResult.type === 'warning' ? 'bg-amber-50 text-amber-700 border border-amber-200' :
+                        'bg-rose-50 text-rose-700 border border-rose-200'
+                    )}>
+                        <div className="flex justify-between items-start">
+                            <span>{importResult.text}</span>
+                            <button
+                                type="button"
+                                onClick={() => setImportResult(null)}
+                                className="ml-4 text-xs opacity-70 hover:opacity-100 font-normal underline"
+                            >
+                                Dismiss
+                            </button>
+                        </div>
+                        {importResult.errors && importResult.errors.length > 0 && (
+                            <ul className="mt-2 space-y-1 text-xs list-disc list-inside">
+                                {importResult.errors.map((err, i) => (
+                                    <li key={i}>{typeof err === 'string' ? err : JSON.stringify(err)}</li>
+                                ))}
+                            </ul>
+                        )}
                     </div>
                 )}
 
@@ -374,6 +478,38 @@ const Transactions = () => {
                                     ))}
                                 </select>
                             </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">{'Counterparty'}</label>
+                                <select
+                                    name="counterparty_id"
+                                    value={formData.counterparty_id}
+                                    onChange={handleChange}
+                                    className="input-field"
+                                >
+                                    <option value="">{'-- Select Counterparty --'}</option>
+                                    {counterparties.map(c => (
+                                        <option key={c.id} value={c.id}>{c.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
+                    </fieldset>
+
+                    {/* VAT & Withholding */}
+                    <fieldset className="space-y-3">
+                        <legend className="text-xs font-semibold text-gray-400 uppercase tracking-wider">{'Tax'}</legend>
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">{'VAT Rate'}</label>
+                                <input type="number" step="0.01" name="vat_rate" value={formData.vat_rate} onChange={handleChange} className="input-field" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">{'VAT Amount (computed)'}</label>
+                                <input type="text" readOnly
+                                    value={formData.amount && formData.vat_rate ?
+                                        (parseFloat(formData.amount || 0) * parseFloat(formData.vat_rate || 0)).toFixed(2) : '0.00'}
+                                    className="mt-1 block w-full rounded-md border-gray-300 bg-gray-50 shadow-sm" />
+                            </div>
                         </div>
                     </fieldset>
 
@@ -398,8 +534,9 @@ const Transactions = () => {
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">{'Status'}</label>
                                 <select name="status" value={formData.status} onChange={handleChange} className="input-field">
-                                    <option value="Planned">{'Planned'}</option>
                                     <option value="Executed">{'Executed'}</option>
+                                    <option value="Planned">{'Planned'}</option>
+                                    <option value="Cancelled">{'Cancelled'}</option>
                                 </select>
                             </div>
                         </div>
