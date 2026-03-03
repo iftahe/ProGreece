@@ -18,6 +18,14 @@ from database import SessionLocal, engine, DB_NAME, IS_RENDER
 # Create tables (only if they don't exist)
 models.Base.metadata.create_all(bind=engine)
 
+# Run phase-4 migration (idempotent) to add new columns to existing tables
+# create_all only creates NEW tables; it won't ALTER existing ones.
+from migrations.phase4_migrate import main as run_phase4_migration
+try:
+    run_phase4_migration()
+except Exception as exc:
+    print(f"[startup] phase4 migration note: {exc}")
+
 # Create performance indexes
 with engine.connect() as conn:
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_tx_project_date ON transactions(project_id, date)"))
