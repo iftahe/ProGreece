@@ -2119,6 +2119,20 @@ async def import_transactions(
 
             # Parse row
             date_str = row.get('date') or row.get('Date')
+            # Parse date string to datetime for SQLite compatibility
+            parsed_date = None
+            if date_str:
+                if isinstance(date_str, (datetime,)):
+                    parsed_date = date_str
+                else:
+                    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d", "%d/%m/%Y"):
+                        try:
+                            parsed_date = datetime.strptime(str(date_str), fmt)
+                            break
+                        except ValueError:
+                            continue
+                    if parsed_date is None:
+                        parsed_date = datetime.fromisoformat(str(date_str))
             amount_str = str(row.get('amount') or row.get('Amount') or '0')
             direction = (row.get('direction') or row.get('Direction') or 'expense').lower()
             description = row.get('description') or row.get('Description') or ''
@@ -2135,22 +2149,24 @@ async def import_transactions(
 
             tx = models.Transaction(
                 project_id=project_id,
-                date=date_str,
+                date=parsed_date,
                 amount=Decimal(amount_str.replace(',', '')),
                 direction=direction,
                 type=direction,
                 description=description,
                 status=status,
                 source_ref=source_ref,
-                budget_category_id=category.id if category else None,
+                budget_item_id=category.id if category else None,
             )
             db.add(tx)
             db.flush()
             imported += 1
         except Exception as e:
+            db.rollback()
             errors.append({"row": i, "error": str(e)})
 
-    db.commit()
+    if imported > 0:
+        db.commit()
     return {"imported": imported, "skipped": skipped, "errors": errors}
 
 
