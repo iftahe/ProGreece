@@ -1653,7 +1653,7 @@ def get_pnl_report(
         vn_wh = vn - vals["withholding_value"]
 
         rows.append({
-            "category": cat.name if cat else "Unknown",
+            "category": cat.category_name if cat else "Unknown",
             "counterparty": cp.name if cp else "Unknown",
             "trans_value": float(vals["trans_value"]),
             "vat_value": float(vals["vat_value"]),
@@ -1729,7 +1729,7 @@ def get_plan_vs_actual_report(
         withholding = sum(D(str(tx.withholding_amount or 0)) for tx in txs)
 
         rows.append({
-            "category": cat.name,
+            "category": cat.category_name,
             "planned": float(planned),
             "actual": float(actual),
             "variance": float(planned - actual),

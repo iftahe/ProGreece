@@ -14,7 +14,7 @@ const Forecast = () => {
 
     useEffect(() => {
         getCompanyForecast()
-            .then(response => setCompanyForecast(response.data || []))
+            .then(response => setCompanyForecast(response.data?.months || []))
             .catch(err => {
                 console.error("Failed to load company forecast", err);
                 setCompanyError("Failed to load company forecast data.");
@@ -24,7 +24,7 @@ const Forecast = () => {
 
     useEffect(() => {
         getProjectsForecast()
-            .then(response => setProjectsForecast(response.data || []))
+            .then(response => setProjectsForecast(response.data?.projects || []))
             .catch(err => {
                 console.error("Failed to load projects forecast", err);
                 setProjectsError("Failed to load project forecast data.");

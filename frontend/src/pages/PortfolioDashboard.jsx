@@ -82,7 +82,7 @@ const PortfolioDashboard = () => {
 
     useEffect(() => {
         getProjectsForecast()
-            .then(response => setForecastData(response.data || []))
+            .then(response => setForecastData(response.data?.projects || []))
             .catch(err => console.error("Failed to load projects forecast", err))
             .finally(() => setForecastLoading(false));
     }, []);
