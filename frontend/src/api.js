@@ -221,4 +221,150 @@ export const bulkAssignBudget = async (transactionIds, budgetCategoryId) => {
     return response.data;
 };
 
+// --- Counterparties ---
+
+export const getCounterparties = async () => {
+    const response = await api.get('/counterparties/');
+    return response.data;
+};
+
+export const createCounterparty = async (data) => {
+    const response = await api.post('/counterparties/', data);
+    return response.data;
+};
+
+export const updateCounterparty = async (id, data) => {
+    const response = await api.put(`/counterparties/${id}`, data);
+    return response.data;
+};
+
+export const deleteCounterparty = async (id) => {
+    const response = await api.delete(`/counterparties/${id}`);
+    return response.data;
+};
+
+// --- Customers ---
+
+export const getCustomers = async () => {
+    const response = await api.get('/customers/');
+    return response.data;
+};
+
+export const createCustomer = async (data) => {
+    const response = await api.post('/customers/', data);
+    return response.data;
+};
+
+export const updateCustomer = async (id, data) => {
+    const response = await api.put(`/customers/${id}`, data);
+    return response.data;
+};
+
+export const deleteCustomer = async (id) => {
+    const response = await api.delete(`/customers/${id}`);
+    return response.data;
+};
+
+// --- Invoices ---
+
+export const getInvoices = async (params = {}) => {
+    const response = await api.get('/invoices/', { params });
+    return response.data;
+};
+
+export const createInvoice = async (data) => {
+    const response = await api.post('/invoices/', data);
+    return response.data;
+};
+
+export const updateInvoice = async (id, data) => {
+    const response = await api.put(`/invoices/${id}`, data);
+    return response.data;
+};
+
+export const deleteInvoice = async (id) => {
+    const response = await api.delete(`/invoices/${id}`);
+    return response.data;
+};
+
+export const linkTransactionToInvoice = async (transactionId, invoiceId) => {
+    const response = await api.post(`/transactions/${transactionId}/link-invoice`, null, { params: { invoice_id: invoiceId } });
+    return response.data;
+};
+
+export const getInvoiceReport = async (params = {}) => {
+    const response = await api.get('/reports/invoices', { params });
+    return response.data;
+};
+
+// --- Reports ---
+
+export const getPnlReport = async (params = {}) => {
+    const response = await api.get('/reports/pnl', { params });
+    return response.data;
+};
+
+export const getPlanVsActualReport = async (params = {}) => {
+    const response = await api.get('/reports/plan-vs-actual', { params });
+    return response.data;
+};
+
+export const getCustomerTransactionsReport = async (params = {}) => {
+    const response = await api.get('/reports/customer-transactions', { params });
+    return response.data;
+};
+
+export const getCustomerBalanceReport = async (params = {}) => {
+    const response = await api.get('/reports/customer-balance', { params });
+    return response.data;
+};
+
+export const getVatReport = async (params = {}) => {
+    const response = await api.get('/reports/vat', { params });
+    return response.data;
+};
+
+export const getWithholdingReport = async (params = {}) => {
+    const response = await api.get('/reports/withholding', { params });
+    return response.data;
+};
+
+export const getPaymentsByProjectReport = async (params = {}) => {
+    const response = await api.get('/reports/payments-by-project', { params });
+    return response.data;
+};
+
+// --- Forecast ---
+
+export const getCompanyForecast = () => api.get('/reports/forecast/company');
+export const getProjectsForecast = () => api.get('/reports/forecast/projects');
+
+// --- Excel Export ---
+
+export const downloadReportExcel = async (reportPath, params = {}, filename = 'report.xlsx') => {
+    const queryParams = new URLSearchParams({ ...params, format: 'xlsx' });
+    const response = await api.get(`${reportPath}?${queryParams.toString()}`, {
+        responseType: 'blob'
+    });
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    link.parentNode.removeChild(link);
+    window.URL.revokeObjectURL(url);
+};
+
+// --- Transaction Import ---
+
+export const importTransactions = (projectId, file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('project_id', projectId);
+    return api.post('/imports/transactions', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+    });
+};
+
 export default api;

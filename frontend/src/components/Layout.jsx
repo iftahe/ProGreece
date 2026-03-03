@@ -3,7 +3,7 @@ import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import {
     DashboardIcon, TransactionsIcon, ProjectsIcon, ApartmentsIcon,
     BudgetIcon, MenuIcon, CloseIcon, PortfolioIcon, SettingsIcon,
-    ChevronDownIcon, ChevronRightIcon,
+    ChevronDownIcon, ChevronRightIcon, BalanceIcon, TableIcon,
 } from './Icons';
 import { useProject } from '../contexts/ProjectContext';
 import { cn } from '../lib/utils';
@@ -19,8 +19,16 @@ const projectNav = [
     { name: 'Transactions', href: '/transactions', icon: TransactionsIcon },
 ];
 
+const financeNav = [
+    { name: 'Invoices', href: '/invoices', icon: BalanceIcon },
+    { name: 'Reports', href: '/reports', icon: TableIcon },
+    { name: 'Forecast', href: '/forecast', icon: BudgetIcon },
+];
+
 const adminNav = [
     { name: 'Projects', href: '/projects', icon: ProjectsIcon },
+    { name: 'Counterparties', href: '/counterparties', icon: SettingsIcon },
+    { name: 'Customers', href: '/customers', icon: ApartmentsIcon },
 ];
 
 const SectionLabel = ({ children }) => (
@@ -106,6 +114,12 @@ const SidebarContent = ({ onLinkClick }) => {
                     <NavLink key={item.href} item={item} isActive={isActive(item.href)} onClick={onLinkClick} searchParams={searchParams} />
                 ))}
 
+                {/* Finance section */}
+                <SectionLabel>{'Finance'}</SectionLabel>
+                {financeNav.map(item => (
+                    <NavLink key={item.href} item={item} isActive={isActive(item.href)} onClick={onLinkClick} searchParams={searchParams} />
+                ))}
+
                 {/* Admin section */}
                 <SectionLabel>{'Management'}</SectionLabel>
                 {adminNav.map(item => (
@@ -132,6 +146,11 @@ const Breadcrumbs = () => {
         '/budget-report': 'Budget',
         '/transactions': 'Transactions',
         '/projects': 'Projects',
+        '/counterparties': 'Counterparties',
+        '/customers': 'Customers',
+        '/invoices': 'Invoices',
+        '/reports': 'Reports',
+        '/forecast': 'Forecast',
     };
 
     const currentPage = pathMap[location.pathname] || '';

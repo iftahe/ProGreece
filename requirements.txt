@@ -5,5 +5,7 @@ pydantic
 gunicorn
 psycopg2-binary
 python-multipart
+openpyxl
+python-dateutil
 pytest
 httpx

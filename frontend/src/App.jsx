@@ -8,6 +8,11 @@ import Transactions from './pages/Transactions';
 import Projects from './pages/Projects';
 import BudgetReport from './pages/BudgetReport';
 import Apartments from './pages/Apartments';
+import Counterparties from './pages/Counterparties';
+import Customers from './pages/Customers';
+import Invoices from './pages/Invoices';
+import Reports from './pages/Reports';
+import Forecast from './pages/Forecast';
 
 function App() {
   return (
@@ -21,6 +26,11 @@ function App() {
             <Route path="/projects" element={<Projects />} />
             <Route path="/apartments" element={<Apartments />} />
             <Route path="/budget-report" element={<BudgetReport />} />
+            <Route path="/counterparties" element={<Counterparties />} />
+            <Route path="/customers" element={<Customers />} />
+            <Route path="/invoices" element={<Invoices />} />
+            <Route path="/reports" element={<Reports />} />
+            <Route path="/forecast" element={<Forecast />} />
           </Routes>
         </Layout>
       </ProjectProvider>

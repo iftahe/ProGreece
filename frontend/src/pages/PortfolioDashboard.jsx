@@ -4,7 +4,7 @@ import {
     ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid,
     Tooltip, Legend, ResponsiveContainer, ReferenceLine
 } from 'recharts';
-import { getPortfolioSummary } from '../api';
+import { getPortfolioSummary, getProjectsForecast } from '../api';
 import { useProject } from '../contexts/ProjectContext';
 import { PortfolioIcon, AlertIcon, ApartmentsIcon, BudgetIcon, BalanceIcon } from '../components/Icons';
 import { cn, formatEUR, formatPercent } from '../lib/utils';
@@ -68,6 +68,8 @@ const SkeletonPortfolio = () => (
 const PortfolioDashboard = () => {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [forecastData, setForecastData] = useState([]);
+    const [forecastLoading, setForecastLoading] = useState(true);
     const { selectProject } = useProject();
     const [searchParams] = useSearchParams();
 
@@ -76,6 +78,13 @@ const PortfolioDashboard = () => {
             .then(setData)
             .catch(err => console.error("Failed to load portfolio summary", err))
             .finally(() => setLoading(false));
+    }, []);
+
+    useEffect(() => {
+        getProjectsForecast()
+            .then(response => setForecastData(response.data?.projects || []))
+            .catch(err => console.error("Failed to load projects forecast", err))
+            .finally(() => setForecastLoading(false));
     }, []);
 
     if (loading) return <SkeletonPortfolio />;
@@ -299,6 +308,69 @@ const PortfolioDashboard = () => {
                         </tbody>
                     </table>
                 </div>
+            </div>
+
+            {/* Forecast Comparison Table */}
+            <div className="card-elevated overflow-hidden">
+                <div className="px-6 py-4 border-b border-gray-100">
+                    <h3 className="text-lg font-semibold text-gray-900">{'Forecast Comparison'}</h3>
+                </div>
+                {forecastLoading ? (
+                    <div className="p-6 space-y-3">
+                        {[...Array(3)].map((_, i) => (
+                            <div key={i} className="skeleton h-10 w-full rounded" />
+                        ))}
+                    </div>
+                ) : forecastData.length === 0 ? (
+                    <p className="text-gray-400 text-sm text-center py-8">{'No forecast data available'}</p>
+                ) : (
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200">
+                            <thead className="bg-gray-50">
+                                <tr>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{'Project'}</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">{'Next 3 Months Net'}</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">{'Next 6 Months Net'}</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">{'Next 12 Months Net'}</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">{'Lowest Cash Point'}</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100 text-sm">
+                                {forecastData.map((proj) => (
+                                    <tr key={proj.project_id} className="hover:bg-gray-50">
+                                        <td className="px-6 py-4 whitespace-nowrap font-semibold text-gray-900">
+                                            {proj.project_name}
+                                        </td>
+                                        <td className={cn(
+                                            "px-6 py-4 whitespace-nowrap text-right font-bold font-mono",
+                                            (proj.net_3m || 0) >= 0 ? 'text-emerald-600' : 'text-rose-600'
+                                        )}>
+                                            {(proj.net_3m || 0) >= 0 ? '+' : ''}{formatEUR(proj.net_3m || 0)}
+                                        </td>
+                                        <td className={cn(
+                                            "px-6 py-4 whitespace-nowrap text-right font-bold font-mono",
+                                            (proj.net_6m || 0) >= 0 ? 'text-emerald-600' : 'text-rose-600'
+                                        )}>
+                                            {(proj.net_6m || 0) >= 0 ? '+' : ''}{formatEUR(proj.net_6m || 0)}
+                                        </td>
+                                        <td className={cn(
+                                            "px-6 py-4 whitespace-nowrap text-right font-bold font-mono",
+                                            (proj.net_12m || 0) >= 0 ? 'text-emerald-600' : 'text-rose-600'
+                                        )}>
+                                            {(proj.net_12m || 0) >= 0 ? '+' : ''}{formatEUR(proj.net_12m || 0)}
+                                        </td>
+                                        <td className={cn(
+                                            "px-6 py-4 whitespace-nowrap text-right font-mono",
+                                            (proj.lowest_cash_point || 0) >= 0 ? 'text-gray-700' : 'text-rose-600 font-bold'
+                                        )}>
+                                            {formatEUR(proj.lowest_cash_point || 0)}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
             </div>
         </div>
     );
