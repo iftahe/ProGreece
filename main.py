@@ -15,6 +15,12 @@ from services.export_service import export_to_excel
 from services.audit_service import log_audit
 from database import SessionLocal, engine, DB_NAME, IS_RENDER
 
+
+def _clean_date(val: Optional[str]) -> Optional[str]:
+    """Normalize empty/whitespace date strings to None."""
+    return val if val and val.strip() else None
+
+
 # Create tables (only if they don't exist)
 models.Base.metadata.create_all(bind=engine)
 
@@ -1557,6 +1563,8 @@ def get_invoice_report(
     db: Session = Depends(get_db)
 ):
     from decimal import Decimal as D
+    date_from = _clean_date(date_from)
+    date_to = _clean_date(date_to)
     query = db.query(models.Invoice)
     filters_applied = {}
     if project_id:
@@ -1636,6 +1644,8 @@ def get_pnl_report(
 ):
     from decimal import Decimal as D
     from collections import defaultdict
+    date_from = _clean_date(date_from)
+    date_to = _clean_date(date_to)
 
     query = db.query(models.Transaction)
     filters_applied = {}
@@ -1802,6 +1812,8 @@ def get_customer_transactions_report(
     db: Session = Depends(get_db)
 ):
     from decimal import Decimal as D
+    date_from = _clean_date(date_from)
+    date_to = _clean_date(date_to)
 
     query = db.query(models.Transaction).filter(
         models.Transaction.customer_id_fk != None,
@@ -1934,6 +1946,8 @@ def get_payments_by_project_report(
 ):
     from decimal import Decimal as D
     from collections import defaultdict
+    date_from = _clean_date(date_from)
+    date_to = _clean_date(date_to)
 
     query = db.query(models.Transaction).filter(models.Transaction.direction == 'out')
     filters_applied = {}
@@ -1994,6 +2008,8 @@ def get_vat_report(
     db: Session = Depends(get_db)
 ):
     from decimal import Decimal as D
+    date_from = _clean_date(date_from)
+    date_to = _clean_date(date_to)
 
     query = db.query(models.Transaction).filter(models.Transaction.vat_amount > 0)
     filters_applied = {}
@@ -2051,6 +2067,8 @@ def get_withholding_report(
 ):
     from decimal import Decimal as D
     from collections import defaultdict
+    date_from = _clean_date(date_from)
+    date_to = _clean_date(date_to)
 
     query = db.query(models.Transaction).filter(models.Transaction.withholding_amount > 0)
     filters_applied = {}
