@@ -15,8 +15,8 @@ const QUARTER_MONTHS = {
     Q4: ['10', '11', '12'],
 };
 
-const KpiCard = ({ icon: Icon, label, value, trend, colorClass, bgClass }) => (
-    <div className="card-elevated p-5 flex items-center gap-4">
+const KpiCard = ({ icon: Icon, label, value, trend, colorClass, bgClass, title }) => (
+    <div className="card-elevated p-5 flex items-center gap-4" title={title}>
         <div className={cn("rounded-lg p-3", bgClass)}>
             <Icon className={cn("w-6 h-6", colorClass)} />
         </div>
@@ -126,7 +126,12 @@ const Dashboard = () => {
         planned_expense: acc.planned_expense + (row.planned_expense || 0),
     }), { income: 0, expense: 0, net: 0, actual_income: 0, planned_income: 0, actual_expense: 0, planned_expense: 0 });
 
-    const balance = data.length > 0 ? data[data.length - 1].Balance : 0;
+    // Opening balance from project data (if available)
+    const openingBalance = selectedProject?.account_balance || selectedProject?.project_account_val || 0;
+    // Current Balance = Opening Balance + Income - Expenses (consistent formula)
+    const currentBalance = openingBalance + totals.income - totals.expense;
+    // Net Cash Flow = change over the period (Income - Expenses), NOT same as Balance
+    const netCashFlow = totals.income - totals.expense;
 
     const incomeTrend = totals.planned_income > 0
         ? ((totals.actual_income - totals.planned_income) / totals.planned_income) * 100
@@ -191,14 +196,18 @@ const Dashboard = () => {
             {!loading && data.length > 0 && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                     <KpiCard icon={IncomeIcon} label={'Total Income'} value={formatEUR(totals.income)}
-                        trend={incomeTrend} colorClass="text-income" bgClass="bg-emerald-50" />
+                        trend={incomeTrend} colorClass="text-income" bgClass="bg-emerald-50"
+                        title="Sum of all income (actual + planned)" />
                     <KpiCard icon={ExpenseIcon} label={'Total Expenses'} value={formatEUR(totals.expense)}
-                        trend={expenseTrend} colorClass="text-expense" bgClass="bg-rose-50" />
-                    <KpiCard icon={NetFlowIcon} label={'Net Cash Flow'} value={formatEUR(totals.net)}
-                        colorClass={totals.net >= 0 ? 'text-income' : 'text-expense'}
-                        bgClass={totals.net >= 0 ? 'bg-emerald-50' : 'bg-rose-50'} />
-                    <KpiCard icon={BalanceIcon} label={'Current Balance'} value={formatEUR(balance)}
-                        colorClass="text-primary-600" bgClass="bg-primary-50" />
+                        trend={expenseTrend} colorClass="text-expense" bgClass="bg-rose-50"
+                        title="Sum of all expenses (actual + planned)" />
+                    <KpiCard icon={NetFlowIcon} label={'Net Cash Flow'} value={formatEUR(netCashFlow)}
+                        colorClass={netCashFlow >= 0 ? 'text-income' : 'text-expense'}
+                        bgClass={netCashFlow >= 0 ? 'bg-emerald-50' : 'bg-rose-50'}
+                        title="Income - Expenses for the displayed period" />
+                    <KpiCard icon={BalanceIcon} label={'Current Balance'} value={formatEUR(currentBalance)}
+                        colorClass="text-primary-600" bgClass="bg-primary-50"
+                        title="Opening Balance + Income - Expenses" />
                     <KpiCard
                         icon={CalendarPlanIcon}
                         label={'Expected Collections'}
