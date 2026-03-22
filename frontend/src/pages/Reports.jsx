@@ -289,6 +289,86 @@ function PnlTab({ projects }) {
     const rows   = data?.rows   || data || [];
     const totals = data?.totals || null;
 
+    const renderPnlRow = (row, i) => {
+        const rt = row.row_type;
+
+        if (rt === 'section_header') {
+            const isIncome = row.section === 'income';
+            const bgClass = isIncome
+                ? 'bg-blue-600 text-white'
+                : 'bg-rose-600 text-white';
+            return (
+                <tr key={i} className={bgClass}>
+                    <td colSpan={7} className="px-4 py-2 text-sm font-bold uppercase tracking-wider">
+                        {isIncome ? 'INCOME' : 'EXPENSES'}
+                    </td>
+                </tr>
+            );
+        }
+
+        if (rt === 'subtotal') {
+            return (
+                <tr key={i} className="bg-gray-100 border-t border-gray-300">
+                    <td className="px-4 py-2 text-sm font-semibold text-gray-700 pl-6">{row.category}</td>
+                    <td className="px-4 py-2 text-sm text-gray-500"></td>
+                    <td className="px-4 py-2 text-sm font-semibold text-right text-gray-800">{fmt(row.trans_value)}</td>
+                    <td className="px-4 py-2 text-sm font-semibold text-right text-gray-800">{fmt(row.vat_value)}</td>
+                    <td className="px-4 py-2 text-sm font-semibold text-right text-gray-800">{fmt(row.value_no_vat)}</td>
+                    <td className="px-4 py-2 text-sm font-semibold text-right text-gray-800">{fmt(row.withholding_value)}</td>
+                    <td className="px-4 py-2 text-sm font-semibold text-right text-gray-800">{fmt(row.value_no_vat_no_withholding)}</td>
+                </tr>
+            );
+        }
+
+        if (rt === 'total') {
+            const isIncome = row.section === 'income';
+            const bgClass = isIncome ? 'bg-blue-100 border-t-2 border-blue-300' : 'bg-rose-100 border-t-2 border-rose-300';
+            const textClass = isIncome ? 'text-blue-900' : 'text-rose-900';
+            return (
+                <tr key={i} className={bgClass}>
+                    <td className={cn('px-4 py-2 text-sm font-bold', textClass)} colSpan={2}>{row.category}</td>
+                    <td className={cn('px-4 py-2 text-sm font-bold text-right', textClass)}>{fmt(row.trans_value)}</td>
+                    <td className={cn('px-4 py-2 text-sm font-bold text-right', textClass)}>{fmt(row.vat_value)}</td>
+                    <td className={cn('px-4 py-2 text-sm font-bold text-right', textClass)}>{fmt(row.value_no_vat)}</td>
+                    <td className={cn('px-4 py-2 text-sm font-bold text-right', textClass)}>{fmt(row.withholding_value)}</td>
+                    <td className={cn('px-4 py-2 text-sm font-bold text-right', textClass)}>{fmt(row.value_no_vat_no_withholding)}</td>
+                </tr>
+            );
+        }
+
+        if (rt === 'grand_total') {
+            const isPositive = (row.trans_value || 0) >= 0;
+            const textClass = isPositive ? 'text-green-900' : 'text-red-900';
+            return (
+                <tr key={i} className="bg-yellow-100 border-t-4 border-yellow-400">
+                    <td className={cn('px-4 py-3 text-base font-bold', textClass)} colSpan={2}>{row.category}</td>
+                    <td className={cn('px-4 py-3 text-base font-bold text-right', textClass)}>{fmt(row.trans_value)}</td>
+                    <td className={cn('px-4 py-3 text-base font-bold text-right', textClass)}>{fmt(row.vat_value)}</td>
+                    <td className={cn('px-4 py-3 text-base font-bold text-right', textClass)}>{fmt(row.value_no_vat)}</td>
+                    <td className={cn('px-4 py-3 text-base font-bold text-right', textClass)}>{fmt(row.withholding_value)}</td>
+                    <td className={cn('px-4 py-3 text-base font-bold text-right', textClass)}>{fmt(row.value_no_vat_no_withholding)}</td>
+                </tr>
+            );
+        }
+
+        // detail row
+        return (
+            <tr
+                key={i}
+                className="hover:bg-blue-50 cursor-pointer border-b border-gray-100"
+                onClick={() => setDrillDown(row.category || row.counterparty || `Row ${i + 1}`)}
+            >
+                <td className="px-4 py-2 text-sm text-gray-700 pl-8">{row.category || '-'}</td>
+                <td className="px-4 py-2 text-sm text-gray-500">{row.counterparty || '-'}</td>
+                <td className="px-4 py-2 text-sm text-right text-gray-700">{fmt(row.trans_value)}</td>
+                <td className="px-4 py-2 text-sm text-right text-gray-700">{fmt(row.vat_value)}</td>
+                <td className="px-4 py-2 text-sm text-right text-gray-700">{fmt(row.value_no_vat)}</td>
+                <td className="px-4 py-2 text-sm text-right text-gray-700">{fmt(row.withholding_value)}</td>
+                <td className="px-4 py-2 text-sm text-right font-medium text-gray-800">{fmt(row.value_no_vat_no_withholding)}</td>
+            </tr>
+        );
+    };
+
     return (
         <div className="space-y-5">
             {drillDown && <DrillDownModal label={drillDown} onClose={() => setDrillDown(null)} />}
@@ -307,45 +387,21 @@ function PnlTab({ projects }) {
                         <EmptyState message="No P&L data found for the selected filters." />
                     ) : (
                         <div className="overflow-x-auto rounded-lg border border-gray-200">
-                            <table className="min-w-full divide-y divide-gray-200">
-                                <thead className="bg-slate-50">
+                            <table className="min-w-full">
+                                <thead className="bg-slate-50 border-b border-gray-200">
                                     <tr>
                                         <Th>Category</Th>
                                         <Th>Counterparty</Th>
                                         <Th right>Trans Value</Th>
                                         <Th right>VAT Value</Th>
-                                        <Th right>Value no VAT</Th>
-                                        <Th right>Withholding</Th>
-                                        <Th right>Value Net</Th>
+                                        <Th right>Value No VAT</Th>
+                                        <Th right>Withholding Value</Th>
+                                        <Th right>Value No VAT No Withholding</Th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-gray-100 bg-white">
-                                    {rows.map((row, i) => (
-                                        <tr
-                                            key={i}
-                                            className={cn('hover:bg-blue-50 cursor-pointer', i % 2 !== 0 && 'bg-slate-50/50')}
-                                            onClick={() => setDrillDown(row.category || row.counterparty || `Row ${i + 1}`)}
-                                        >
-                                            <Td>{row.category || '-'}</Td>
-                                            <Td>{row.counterparty || '-'}</Td>
-                                            <Td right>{fmt(row.trans_value)}</Td>
-                                            <Td right>{fmt(row.vat_value)}</Td>
-                                            <Td right>{fmt(row.value_no_vat)}</Td>
-                                            <Td right>{fmt(row.withholding)}</Td>
-                                            <Td right bold>{fmt(row.value_net)}</Td>
-                                        </tr>
-                                    ))}
+                                <tbody className="bg-white">
+                                    {rows.map((row, i) => renderPnlRow(row, i))}
                                 </tbody>
-                                <tfoot className="bg-slate-100 border-t-2 border-gray-300">
-                                    <tr>
-                                        <TdTotal colSpan={2}>Total ({rows.length} row{rows.length !== 1 ? 's' : ''})</TdTotal>
-                                        <TdTotal right>{fmt(totals?.total_trans_value  ?? rows.reduce((s, r) => s + (r.trans_value  || 0), 0))}</TdTotal>
-                                        <TdTotal right>{fmt(totals?.total_vat_value    ?? rows.reduce((s, r) => s + (r.vat_value    || 0), 0))}</TdTotal>
-                                        <TdTotal right>{fmt(totals?.total_value_no_vat ?? rows.reduce((s, r) => s + (r.value_no_vat || 0), 0))}</TdTotal>
-                                        <TdTotal right>{fmt(totals?.total_withholding  ?? rows.reduce((s, r) => s + (r.withholding  || 0), 0))}</TdTotal>
-                                        <TdTotal right className="text-gray-900">{fmt(totals?.total_value_net ?? rows.reduce((s, r) => s + (r.value_net || 0), 0))}</TdTotal>
-                                    </tr>
-                                </tfoot>
                             </table>
                         </div>
                     )}

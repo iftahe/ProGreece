@@ -1643,7 +1643,8 @@ def get_pnl_report(
     db: Session = Depends(get_db)
 ):
     from decimal import Decimal as D
-    from collections import defaultdict
+    from collections import OrderedDict
+
     date_from = _clean_date(date_from)
     date_to = _clean_date(date_to)
 
@@ -1660,60 +1661,126 @@ def get_pnl_report(
         filters_applied["date_to"] = date_to
     if status:
         query = query.filter(models.Transaction.status == status)
-        filters_applied["status"] = status
     else:
         query = query.filter(models.Transaction.status == 'executed')
 
     transactions = query.all()
 
-    # Group by category_id + counterparty_id
-    groups = defaultdict(lambda: {"trans_value": D('0'), "vat_value": D('0'), "withholding_value": D('0')})
+    # Resolve category: budget_item > legacy category > "Uncategorized"
+    def resolve_category(tx):
+        if tx.budget_item_id:
+            cat = db.query(models.BudgetCategory).filter(
+                models.BudgetCategory.id == tx.budget_item_id
+            ).first()
+            if cat:
+                return cat.category_name
+        if tx.category and tx.category.strip():
+            return tx.category.strip()
+        return "Uncategorized"
+
+    def resolve_counterparty(tx):
+        if tx.counterparty_id:
+            cp = db.query(models.Counterparty).filter(
+                models.Counterparty.id == tx.counterparty_id
+            ).first()
+            if cp:
+                return cp.name
+        return tx.supplier or "Unknown"
+
+    # Separate income vs expense, group by category then counterparty
+    sections = {"income": OrderedDict(), "expense": OrderedDict()}
 
     for tx in transactions:
-        sign = D('1') if (tx.direction == 'in') else D('-1')
+        section = "income" if tx.direction == 'in' else "expense"
+        cat_name = resolve_category(tx)
+        cp_name = resolve_counterparty(tx)
         amount = D(str(tx.amount or 0))
         vat = D(str(tx.vat_amount or 0))
         withholding = D(str(tx.withholding_amount or 0))
 
-        key = (tx.budget_item_id, tx.counterparty_id)
-        groups[key]["trans_value"] += sign * amount
-        groups[key]["vat_value"] += sign * vat
-        groups[key]["withholding_value"] += sign * withholding
+        if cat_name not in sections[section]:
+            sections[section][cat_name] = OrderedDict()
+        if cp_name not in sections[section][cat_name]:
+            sections[section][cat_name][cp_name] = {
+                "trans_value": D('0'), "vat_value": D('0'), "withholding_value": D('0')
+            }
+        sections[section][cat_name][cp_name]["trans_value"] += amount
+        sections[section][cat_name][cp_name]["vat_value"] += vat
+        sections[section][cat_name][cp_name]["withholding_value"] += withholding
 
+    # Build rows with row_type
     rows = []
-    total_trans = D('0')
-    total_vat = D('0')
-    total_withholding = D('0')
+    grand = {"income": D('0'), "expense": D('0')}
+    grand_vat = {"income": D('0'), "expense": D('0')}
+    grand_wh = {"income": D('0'), "expense": D('0')}
 
-    for (cat_id, cp_id), vals in groups.items():
-        cat = db.query(models.BudgetCategory).filter(models.BudgetCategory.id == cat_id).first() if cat_id else None
-        cp = db.query(models.Counterparty).filter(models.Counterparty.id == cp_id).first() if cp_id else None
+    for section in ["income", "expense"]:
+        rows.append({"row_type": "section_header", "section": section,
+                      "category": section.capitalize(), "counterparty": "",
+                      "trans_value": 0, "vat_value": 0, "value_no_vat": 0,
+                      "withholding_value": 0, "value_no_vat_no_withholding": 0})
 
-        vn = vals["trans_value"] - vals["vat_value"]
-        vn_wh = vn - vals["withholding_value"]
+        for cat_name, counterparties in sections[section].items():
+            cat_total = D('0'); cat_vat = D('0'); cat_wh = D('0')
+            for cp_name, vals in counterparties.items():
+                tv = vals["trans_value"]
+                vv = vals["vat_value"]
+                wv = vals["withholding_value"]
+                vn = tv - vv
+                vn_wh = vn - wv
+                rows.append({
+                    "row_type": "detail", "section": section,
+                    "category": cat_name, "counterparty": cp_name,
+                    "trans_value": float(tv), "vat_value": float(vv),
+                    "value_no_vat": float(vn), "withholding_value": float(wv),
+                    "value_no_vat_no_withholding": float(vn_wh)
+                })
+                cat_total += tv; cat_vat += vv; cat_wh += wv
 
+            vn = cat_total - cat_vat
+            rows.append({
+                "row_type": "subtotal", "section": section,
+                "category": f"Total {cat_name}", "counterparty": "",
+                "trans_value": float(cat_total), "vat_value": float(cat_vat),
+                "value_no_vat": float(vn), "withholding_value": float(cat_wh),
+                "value_no_vat_no_withholding": float(vn - cat_wh)
+            })
+            grand[section] += cat_total
+            grand_vat[section] += cat_vat
+            grand_wh[section] += cat_wh
+
+        vn = grand[section] - grand_vat[section]
         rows.append({
-            "category": cat.category_name if cat else "Unknown",
-            "counterparty": cp.name if cp else "Unknown",
-            "trans_value": float(vals["trans_value"]),
-            "vat_value": float(vals["vat_value"]),
-            "value_no_vat": float(vn),
-            "withholding_value": float(vals["withholding_value"]),
-            "value_no_vat_no_withholding": float(vn_wh)
+            "row_type": "total", "section": section,
+            "category": f"Total {section.capitalize()}", "counterparty": "",
+            "trans_value": float(grand[section]), "vat_value": float(grand_vat[section]),
+            "value_no_vat": float(vn), "withholding_value": float(grand_wh[section]),
+            "value_no_vat_no_withholding": float(vn - grand_wh[section])
         })
-        total_trans += vals["trans_value"]
-        total_vat += vals["vat_value"]
-        total_withholding += vals["withholding_value"]
 
-    total_vn = total_trans - total_vat
+    # Net Profit/Loss
+    net = grand["income"] - grand["expense"]
+    net_vat = grand_vat["income"] - grand_vat["expense"]
+    net_wh = grand_wh["income"] - grand_wh["expense"]
+    net_vn = net - net_vat
+    rows.append({
+        "row_type": "grand_total", "section": "net",
+        "category": "Net Profit / Loss", "counterparty": "",
+        "trans_value": float(net), "vat_value": float(net_vat),
+        "value_no_vat": float(net_vn), "withholding_value": float(net_wh),
+        "value_no_vat_no_withholding": float(net_vn - net_wh)
+    })
+
     result = {
         "rows": rows,
         "totals": {
-            "trans_value": float(total_trans),
-            "vat_value": float(total_vat),
-            "value_no_vat": float(total_vn),
-            "withholding_value": float(total_withholding),
-            "value_no_vat_no_withholding": float(total_vn - total_withholding)
+            "income_total": float(grand["income"]),
+            "expense_total": float(grand["expense"]),
+            "net_profit": float(net),
+            "trans_value": float(net), "vat_value": float(net_vat),
+            "value_no_vat": float(net_vn),
+            "withholding_value": float(net_wh),
+            "value_no_vat_no_withholding": float(net_vn - net_wh)
         },
         "drilldown_supported": True,
         "filters_applied": filters_applied
