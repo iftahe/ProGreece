@@ -378,6 +378,112 @@ def get_projects_forecast(format: str = Query(None), db: Session = Depends(get_d
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/reports/forecast/drilldown/{project_id}/{month}")
+def get_forecast_drilldown(project_id: int, month: str, db: Session = Depends(get_db)):
+    """Return individual items composing a forecast month.
+    month format: YYYY-MM
+    """
+    from decimal import Decimal as D
+    import calendar
+
+    parts = month.split("-")
+    if len(parts) != 2:
+        raise HTTPException(400, "month must be YYYY-MM format")
+    year, mo = int(parts[0]), int(parts[1])
+    start = f"{year}-{mo:02d}-01"
+    last_day = calendar.monthrange(year, mo)[1]
+    end = f"{year}-{mo:02d}-{last_day}"
+
+    # Actual executed transactions in this month
+    txs = db.query(models.Transaction).filter(
+        models.Transaction.project_id == project_id,
+        models.Transaction.date >= start,
+        models.Transaction.date <= end,
+        models.Transaction.status == 'executed'
+    ).all()
+
+    inflow_items = []
+    outflow_items = []
+    for tx in txs:
+        cp = db.query(models.Counterparty).filter(models.Counterparty.id == tx.counterparty_id).first() if tx.counterparty_id else None
+        cat_name = tx.category or "Uncategorized"
+        if tx.budget_item_id:
+            cat_obj = db.query(models.BudgetCategory).filter(models.BudgetCategory.id == tx.budget_item_id).first()
+            if cat_obj:
+                cat_name = cat_obj.category_name
+        item = {
+            "date": str(tx.date) if tx.date else "",
+            "category": cat_name,
+            "counterparty": cp.name if cp else tx.supplier or "Unknown",
+            "amount": float(tx.amount or 0),
+            "status": "executed",
+            "reference": tx.source_ref or tx.description or ""
+        }
+        if tx.direction == 'in':
+            inflow_items.append(item)
+        else:
+            outflow_items.append(item)
+
+    # Planned (not yet executed) for this month
+    planned_txs = db.query(models.Transaction).filter(
+        models.Transaction.project_id == project_id,
+        models.Transaction.date >= start,
+        models.Transaction.date <= end,
+        models.Transaction.status == 'planned'
+    ).all()
+
+    for tx in planned_txs:
+        cp = db.query(models.Counterparty).filter(models.Counterparty.id == tx.counterparty_id).first() if tx.counterparty_id else None
+        cat_name = tx.category or "Uncategorized"
+        if tx.budget_item_id:
+            cat_obj = db.query(models.BudgetCategory).filter(models.BudgetCategory.id == tx.budget_item_id).first()
+            if cat_obj:
+                cat_name = cat_obj.category_name
+        item = {
+            "date": str(tx.date) if tx.date else "",
+            "category": cat_name,
+            "counterparty": cp.name if cp else tx.supplier or "Unknown",
+            "amount": float(tx.amount or 0),
+            "status": "planned",
+            "reference": tx.source_ref or tx.description or ""
+        }
+        if tx.direction == 'in':
+            inflow_items.append(item)
+        else:
+            outflow_items.append(item)
+
+    # Expected collections (unpaid apartment balances)
+    from services.forecast_service import compute_unpaid_balances
+    unpaid_list = compute_unpaid_balances(db, project_id)
+    for entry in unpaid_list:
+        unpaid_amt = float(entry.get("unpaid", 0))
+        if unpaid_amt > 0:
+            apt = db.query(models.Apartment).filter(models.Apartment.id == entry["apartment_id"]).first()
+            cust_name = "Unknown"
+            if apt and apt.customer_id:
+                cust = db.query(models.Customer).filter(models.Customer.id == apt.customer_id).first()
+                if cust:
+                    cust_name = cust.full_name
+            elif apt and apt.customer_name:
+                cust_name = apt.customer_name
+            inflow_items.append({
+                "date": start,
+                "category": "Expected Collection",
+                "counterparty": f"{cust_name} - {entry.get('apartment_name', '')}",
+                "amount": unpaid_amt,
+                "status": "expected",
+                "reference": "Unpaid apartment balance"
+            })
+
+    return {
+        "month": month,
+        "project_id": project_id,
+        "inflow_items": sorted(inflow_items, key=lambda x: x.get("date", "")),
+        "outflow_items": sorted(outflow_items, key=lambda x: x.get("date", "")),
+        "inflow_total": sum(i["amount"] for i in inflow_items),
+        "outflow_total": sum(i["amount"] for i in outflow_items)
+    }
+
 @app.get("/projects/{project_id}/budget-items", response_model=List[schemas.BudgetCategory])
 def read_project_budget_items(project_id: int, db: Session = Depends(get_db)):
     items = db.query(models.BudgetCategory).filter(models.BudgetCategory.project_id == project_id).all()

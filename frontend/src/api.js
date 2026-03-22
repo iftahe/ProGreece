@@ -337,6 +337,8 @@ export const getPaymentsByProjectReport = async (params = {}) => {
 
 export const getCompanyForecast = () => api.get('/reports/forecast/company');
 export const getProjectsForecast = () => api.get('/reports/forecast/projects');
+export const getForecastDrilldown = (projectId, month) =>
+    api.get(`/reports/forecast/drilldown/${projectId}/${month}`).then(r => r.data);
 
 // --- Excel Export ---
 

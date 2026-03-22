@@ -1,7 +1,177 @@
 import React, { useEffect, useState } from 'react';
-import { getCompanyForecast, getProjectsForecast } from '../api';
+import { getCompanyForecast, getProjectsForecast, getForecastDrilldown } from '../api';
 import { AlertIcon, CalendarPlanIcon, PortfolioIcon } from '../components/Icons';
 import { cn, formatEUR } from '../lib/utils';
+
+// Status badge helper
+const StatusBadge = ({ status }) => {
+    if (status === 'executed') {
+        return (
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700">
+                Executed
+            </span>
+        );
+    }
+    if (status === 'planned') {
+        return (
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-700">
+                Planned
+            </span>
+        );
+    }
+    if (status === 'expected') {
+        return (
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
+                Expected
+            </span>
+        );
+    }
+    return <span className="text-xs text-gray-500">{status}</span>;
+};
+
+// Drilldown items table section
+const DrilldownSection = ({ title, items, total, colorClass }) => (
+    <div className="mb-6">
+        <h3 className={cn("text-sm font-semibold uppercase tracking-wider mb-2", colorClass)}>
+            {title}
+        </h3>
+        {items.length === 0 ? (
+            <p className="text-sm text-gray-400 italic py-2">No items</p>
+        ) : (
+            <div className="overflow-x-auto">
+                <table className="min-w-full text-sm divide-y divide-gray-200">
+                    <thead className="bg-slate-50">
+                        <tr>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Counterparty</th>
+                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                            <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reference</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                        {items.map((item, idx) => (
+                            <tr key={idx} className="hover:bg-gray-50">
+                                <td className="px-3 py-2 whitespace-nowrap text-gray-700">{item.date}</td>
+                                <td className="px-3 py-2 whitespace-nowrap text-gray-700">{item.category}</td>
+                                <td className="px-3 py-2 whitespace-nowrap text-gray-700">{item.counterparty}</td>
+                                <td className="px-3 py-2 whitespace-nowrap text-right font-mono font-medium text-gray-900">
+                                    {formatEUR(item.amount)}
+                                </td>
+                                <td className="px-3 py-2 whitespace-nowrap text-center">
+                                    <StatusBadge status={item.status} />
+                                </td>
+                                <td className="px-3 py-2 text-gray-500 max-w-xs truncate">{item.reference}</td>
+                            </tr>
+                        ))}
+                        {/* Totals row */}
+                        <tr className="bg-gray-100 font-bold border-t-2 border-gray-300">
+                            <td colSpan={3} className="px-3 py-2 text-gray-700">Total</td>
+                            <td className={cn("px-3 py-2 text-right font-mono amount", colorClass)}>
+                                {formatEUR(total)}
+                            </td>
+                            <td colSpan={2} />
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        )}
+    </div>
+);
+
+// Drilldown modal
+const DrilldownModal = ({ data, loading, onClose, projects, onProjectChange, selectedProjectId }) => {
+    if (!data && !loading) return null;
+
+    return (
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
+            onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+        >
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col">
+                {/* Modal header */}
+                <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                        <h2 className="text-lg font-semibold text-gray-900">
+                            Forecast Details — {data?.month || ''}
+                        </h2>
+                        {projects && projects.length > 1 && (
+                            <select
+                                className="border border-gray-300 rounded-md text-sm px-2 py-1 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                                value={selectedProjectId || ''}
+                                onChange={(e) => onProjectChange(Number(e.target.value))}
+                            >
+                                {projects.map(p => (
+                                    <option key={p.project_id} value={p.project_id}>
+                                        {p.project_name}
+                                    </option>
+                                ))}
+                            </select>
+                        )}
+                    </div>
+                    <button
+                        onClick={onClose}
+                        className="text-gray-400 hover:text-gray-600 transition-colors"
+                        aria-label="Close"
+                    >
+                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+
+                {/* Modal body */}
+                <div className="overflow-y-auto flex-1 px-6 py-4">
+                    {loading ? (
+                        <div className="space-y-3 py-4">
+                            {[...Array(5)].map((_, i) => (
+                                <div key={i} className="skeleton h-8 w-full rounded" />
+                            ))}
+                        </div>
+                    ) : data ? (
+                        <>
+                            <DrilldownSection
+                                title="Inflows"
+                                items={data.inflow_items}
+                                total={data.inflow_total}
+                                colorClass="text-emerald-700"
+                            />
+                            <DrilldownSection
+                                title="Outflows"
+                                items={data.outflow_items}
+                                total={data.outflow_total}
+                                colorClass="text-rose-700"
+                            />
+                            {/* Net summary */}
+                            <div className="border-t border-gray-200 pt-3 flex justify-end gap-8 text-sm font-semibold">
+                                <span className="text-gray-600">Net:</span>
+                                <span className={cn(
+                                    "font-mono",
+                                    (data.inflow_total - data.outflow_total) >= 0 ? 'text-emerald-700' : 'text-rose-700'
+                                )}>
+                                    {(data.inflow_total - data.outflow_total) >= 0 ? '+' : ''}
+                                    {formatEUR(data.inflow_total - data.outflow_total)}
+                                </span>
+                            </div>
+                        </>
+                    ) : null}
+                </div>
+
+                {/* Modal footer */}
+                <div className="px-6 py-3 border-t border-gray-100 flex justify-end">
+                    <button
+                        onClick={onClose}
+                        className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                    >
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
 
 const Forecast = () => {
     const [companyForecast, setCompanyForecast] = useState([]);
@@ -11,6 +181,12 @@ const Forecast = () => {
     const [projectsForecast, setProjectsForecast] = useState([]);
     const [projectsLoading, setProjectsLoading] = useState(true);
     const [projectsError, setProjectsError] = useState(null);
+
+    // Drilldown state
+    const [drilldownData, setDrilldownData] = useState(null);
+    const [drilldownLoading, setDrilldownLoading] = useState(false);
+    const [drilldownMonth, setDrilldownMonth] = useState(null);
+    const [drilldownProjectId, setDrilldownProjectId] = useState(null);
 
     useEffect(() => {
         getCompanyForecast()
@@ -31,6 +207,44 @@ const Forecast = () => {
             })
             .finally(() => setProjectsLoading(false));
     }, []);
+
+    const handleMonthClick = async (projectId, month) => {
+        setDrilldownMonth(month);
+        setDrilldownProjectId(projectId);
+        setDrilldownData(null);
+        setDrilldownLoading(true);
+        try {
+            const data = await getForecastDrilldown(projectId, month);
+            setDrilldownData(data);
+        } catch (err) {
+            console.error('Failed to load drilldown', err);
+        } finally {
+            setDrilldownLoading(false);
+        }
+    };
+
+    const handleProjectChange = async (newProjectId) => {
+        setDrilldownProjectId(newProjectId);
+        setDrilldownData(null);
+        setDrilldownLoading(true);
+        try {
+            const data = await getForecastDrilldown(newProjectId, drilldownMonth);
+            setDrilldownData(data);
+        } catch (err) {
+            console.error('Failed to load drilldown', err);
+        } finally {
+            setDrilldownLoading(false);
+        }
+    };
+
+    const handleCloseDrilldown = () => {
+        setDrilldownData(null);
+        setDrilldownMonth(null);
+        setDrilldownProjectId(null);
+    };
+
+    // Determine default project for company forecast row clicks
+    const defaultProjectId = projectsForecast.length > 0 ? projectsForecast[0].project_id : null;
 
     // Compute totals row for company forecast
     const companyTotals = companyForecast.reduce(
@@ -55,7 +269,10 @@ const Forecast = () => {
                     <div className="rounded-lg p-2.5 bg-blue-50">
                         <CalendarPlanIcon className="w-5 h-5 text-blue-600" />
                     </div>
-                    <h2 className="text-lg font-semibold text-gray-900">{'Company Cash Flow Forecast (12 Months)'}</h2>
+                    <div>
+                        <h2 className="text-lg font-semibold text-gray-900">{'Company Cash Flow Forecast (12 Months)'}</h2>
+                        <p className="text-xs text-gray-500 mt-0.5">Click Inflows or Outflows to see item breakdown</p>
+                    </div>
                 </div>
 
                 {companyLoading ? (
@@ -94,10 +311,18 @@ const Forecast = () => {
                                         )}
                                     >
                                         <td className="px-4 py-3 whitespace-nowrap font-medium text-gray-900">{row.month}</td>
-                                        <td className="px-4 py-3 whitespace-nowrap text-right text-emerald-600 font-medium amount bg-emerald-50/30">
+                                        <td
+                                            className="px-4 py-3 whitespace-nowrap text-right text-emerald-600 font-medium amount bg-emerald-50/30 cursor-pointer hover:bg-emerald-100 hover:underline transition-colors"
+                                            onClick={() => defaultProjectId && handleMonthClick(defaultProjectId, row.month)}
+                                            title="Click to see breakdown"
+                                        >
                                             {formatEUR(row.inflows || 0)}
                                         </td>
-                                        <td className="px-4 py-3 whitespace-nowrap text-right text-rose-600 font-medium amount bg-rose-50/30">
+                                        <td
+                                            className="px-4 py-3 whitespace-nowrap text-right text-rose-600 font-medium amount bg-rose-50/30 cursor-pointer hover:bg-rose-100 hover:underline transition-colors"
+                                            onClick={() => defaultProjectId && handleMonthClick(defaultProjectId, row.month)}
+                                            title="Click to see breakdown"
+                                        >
                                             {formatEUR(row.outflows || 0)}
                                         </td>
                                         <td className={cn(
@@ -218,6 +443,18 @@ const Forecast = () => {
                     </div>
                 )}
             </div>
+
+            {/* Drilldown Modal */}
+            {(drilldownData || drilldownLoading) && (
+                <DrilldownModal
+                    data={drilldownData}
+                    loading={drilldownLoading}
+                    onClose={handleCloseDrilldown}
+                    projects={projectsForecast}
+                    onProjectChange={handleProjectChange}
+                    selectedProjectId={drilldownProjectId}
+                />
+            )}
         </div>
     );
 };
