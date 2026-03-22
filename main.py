@@ -1879,47 +1879,95 @@ def get_customer_transactions_report(
     db: Session = Depends(get_db)
 ):
     from decimal import Decimal as D
+
     date_from = _clean_date(date_from)
     date_to = _clean_date(date_to)
+    filters_applied = {}
 
-    query = db.query(models.Transaction).filter(
+    # Primary: CustomerPayments via apartments (same source as Customer Balance)
+    apt_query = db.query(models.Apartment).filter(models.Apartment.customer_id != None)
+    if project_id:
+        apt_query = apt_query.filter(models.Apartment.project_id == project_id)
+        filters_applied["project_id"] = project_id
+    if customer_id:
+        apt_query = apt_query.filter(models.Apartment.customer_id == customer_id)
+        filters_applied["customer_id"] = customer_id
+    apartments = apt_query.all()
+
+    rows = []
+    total_amount = D('0')
+    seen_amounts = set()  # For dedup: (customer, date, amount)
+
+    for apt in apartments:
+        cust = db.query(models.Customer).filter(models.Customer.id == apt.customer_id).first()
+        proj = db.query(models.Project).filter(models.Project.id == apt.project_id).first()
+
+        pay_query = db.query(models.CustomerPayment).filter(
+            models.CustomerPayment.apartment_id == apt.id
+        )
+        if date_from:
+            pay_query = pay_query.filter(models.CustomerPayment.date >= date_from)
+        if date_to:
+            pay_query = pay_query.filter(models.CustomerPayment.date <= date_to)
+
+        payments = pay_query.all()
+        for p in payments:
+            amount = D(str(p.amount or 0))
+            total_amount += amount
+            cust_name = cust.full_name if cust else apt.customer_name or "Unknown"
+            date_str = str(p.date) if p.date else ""
+            seen_amounts.add((cust_name, date_str, float(amount)))
+            rows.append({
+                "customer": cust_name,
+                "project": proj.name if proj else "Unknown",
+                "apartment": apt.apartment_number or apt.unit_number or str(apt.id),
+                "date": date_str,
+                "amount": float(amount),
+                "description": p.notes or p.payment_method or "",
+                "source_ref": ""
+            })
+
+    # Secondary: Transactions with customer_id_fk (for future-linked data)
+    tx_query = db.query(models.Transaction).filter(
         models.Transaction.customer_id_fk != None,
         models.Transaction.direction == 'in',
         models.Transaction.status == 'executed'
     )
-    filters_applied = {}
     if project_id:
-        query = query.filter(models.Transaction.project_id == project_id)
-        filters_applied["project_id"] = project_id
+        tx_query = tx_query.filter(models.Transaction.project_id == project_id)
     if customer_id:
-        query = query.filter(models.Transaction.customer_id_fk == customer_id)
-        filters_applied["customer_id"] = customer_id
+        tx_query = tx_query.filter(models.Transaction.customer_id_fk == customer_id)
     if date_from:
-        query = query.filter(models.Transaction.date >= date_from)
-        filters_applied["date_from"] = date_from
+        tx_query = tx_query.filter(models.Transaction.date >= date_from)
     if date_to:
-        query = query.filter(models.Transaction.date <= date_to)
-        filters_applied["date_to"] = date_to
+        tx_query = tx_query.filter(models.Transaction.date <= date_to)
 
-    transactions = query.all()
-    total_amount = D('0')
-    rows = []
-
-    for tx in transactions:
-        cust = db.query(models.Customer).filter(models.Customer.id == tx.customer_id_fk).first() if tx.customer_id_fk else None
-        proj = db.query(models.Project).filter(models.Project.id == tx.project_id).first() if tx.project_id else None
-        apt = db.query(models.Apartment).filter(models.Apartment.id == tx.apartment_id).first() if hasattr(tx, 'apartment_id') and tx.apartment_id else None
+    for tx in tx_query.all():
+        cust = db.query(models.Customer).filter(models.Customer.id == tx.customer_id_fk).first()
+        proj = db.query(models.Project).filter(models.Project.id == tx.project_id).first()
+        apt = db.query(models.Apartment).filter(models.Apartment.id == tx.apartment_id).first() if tx.apartment_id else None
         amount = D(str(tx.amount or 0))
+        cust_name = cust.full_name if cust else "Unknown"
+        date_str = str(tx.date) if tx.date else ""
+
+        # Skip duplicates
+        dedup_key = (cust_name, date_str, float(amount))
+        if dedup_key in seen_amounts:
+            continue
+        seen_amounts.add(dedup_key)
+
         total_amount += amount
         rows.append({
-            "customer": cust.full_name if cust else "Unknown",
+            "customer": cust_name,
             "project": proj.name if proj else "Unknown",
             "apartment": apt.apartment_number if apt else "",
-            "date": str(tx.date) if tx.date else "",
+            "date": date_str,
             "amount": float(amount),
             "description": tx.description or "",
             "source_ref": tx.source_ref or ""
         })
+
+    rows.sort(key=lambda r: r.get("date", ""))
 
     result = {
         "rows": rows,
