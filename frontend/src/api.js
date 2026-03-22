@@ -355,6 +355,17 @@ export const downloadReportExcel = async (reportPath, params = {}, filename = 'r
     window.URL.revokeObjectURL(url);
 };
 
+// --- Invoice Import ---
+
+export const importInvoices = (projectId, file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('project_id', projectId);
+    return api.post('/invoices/import', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+    }).then(r => r.data);
+};
+
 // --- Transaction Import ---
 
 export const importTransactions = (projectId, file) => {

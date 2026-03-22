@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
     getInvoices, createInvoice, updateInvoice, deleteInvoice,
-    getProjects, getCustomers, getCounterparties
+    getProjects, getCustomers, getCounterparties, importInvoices
 } from '../api';
 import { PencilIcon, TrashIcon, EmptyStateIcon } from '../components/Icons';
 import { cn, formatEUR } from '../lib/utils';
@@ -37,6 +37,10 @@ export default function Invoices() {
     const [editing, setEditing] = useState(null);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState(null);
+    const [importing, setImporting] = useState(false);
+    const [importResult, setImportResult] = useState(null);
+    const [importProjectId, setImportProjectId] = useState('');
+    const fileInputRef = useRef(null);
     const [formData, setFormData] = useState({
         project_id: '',
         customer_id: '',
@@ -142,6 +146,28 @@ export default function Invoices() {
         }
     };
 
+    const handleImportCSV = async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        if (!importProjectId) {
+            setImportResult({ error: 'Please select a project before importing.' });
+            e.target.value = '';
+            return;
+        }
+        setImporting(true);
+        setImportResult(null);
+        try {
+            const result = await importInvoices(importProjectId, file);
+            setImportResult(result);
+            fetchAll();
+        } catch (err) {
+            setImportResult({ error: err?.response?.data?.detail || 'Import failed' });
+        } finally {
+            setImporting(false);
+            e.target.value = '';
+        }
+    };
+
     const getProjectName = (id) => projects.find(p => p.id === id)?.name || '-';
     const getCustomerName = (id) => id ? (customers.find(c => c.id === id)?.full_name || '-') : '-';
     const getCPName = (id) => id ? (counterparties.find(c => c.id === id)?.name || '-') : '-';
@@ -151,16 +177,73 @@ export default function Invoices() {
     return (
         <div className="space-y-6">
             {/* Header */}
-            <div className="flex justify-between items-center">
+            <div className="flex flex-wrap justify-between items-center gap-3">
                 <h1 className="text-2xl font-bold text-gray-900">Invoices</h1>
-                <button
-                    onClick={openCreate}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors"
-                >
-                    <span className="text-lg leading-none">+</span>
-                    Add Invoice
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                    {/* CSV Import controls */}
+                    <select
+                        value={importProjectId}
+                        onChange={e => setImportProjectId(e.target.value)}
+                        className="input-field text-sm h-9 py-1.5 w-44"
+                    >
+                        <option value="">Project for import...</option>
+                        {projects.map(p => (
+                            <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                    </select>
+                    <button
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={importing}
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        {importing ? 'Importing...' : 'Import CSV'}
+                    </button>
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".csv,text/csv"
+                        className="hidden"
+                        onChange={handleImportCSV}
+                    />
+                    <button
+                        onClick={openCreate}
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors"
+                    >
+                        <span className="text-lg leading-none">+</span>
+                        Add Invoice
+                    </button>
+                </div>
             </div>
+
+            {/* Import result banner */}
+            {importResult && (
+                <div className={cn(
+                    'p-4 rounded-lg text-sm font-medium border',
+                    importResult.error
+                        ? 'bg-rose-50 text-rose-700 border-rose-200'
+                        : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                )}>
+                    {importResult.error ? (
+                        importResult.error
+                    ) : (
+                        <>
+                            Imported {importResult.imported} invoice{importResult.imported !== 1 ? 's' : ''}.
+                            {importResult.errors?.length > 0 && (
+                                <span className="ml-2 text-amber-700">
+                                    {importResult.errors.length} row{importResult.errors.length !== 1 ? 's' : ''} had errors:{' '}
+                                    {importResult.errors.join('; ')}
+                                </span>
+                            )}
+                        </>
+                    )}
+                    <button
+                        onClick={() => setImportResult(null)}
+                        className="ml-3 underline text-xs opacity-70 hover:opacity-100"
+                    >
+                        Dismiss
+                    </button>
+                </div>
+            )}
 
             {error && !showModal && (
                 <div className="p-4 rounded-lg text-sm font-medium bg-rose-50 text-rose-700 border border-rose-200">

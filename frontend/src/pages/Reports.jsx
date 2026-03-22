@@ -580,7 +580,7 @@ function InvoiceDetailsTab({ projects, customers }) {
             {!loading && hasRun && (
                 <>
                     {rows.length === 0 ? (
-                        <EmptyState message="No invoices found for the selected filters." />
+                        <EmptyState message="No invoices found for this project. Import invoices from the Invoices page or create them manually." />
                     ) : (
                         <div className="overflow-x-auto rounded-lg border border-gray-200">
                             <table className="min-w-full divide-y divide-gray-200">

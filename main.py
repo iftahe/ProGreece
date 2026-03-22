@@ -1582,6 +1582,51 @@ def delete_invoice(invoice_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"ok": True}
 
+@app.post("/invoices/import")
+def import_invoices(file: UploadFile = File(...), project_id: int = Form(...), db: Session = Depends(get_db)):
+    """Bulk import invoices from CSV file."""
+    import csv, io
+    content = file.file.read().decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(content))
+    imported = 0
+    errors = []
+    for i, row in enumerate(reader, 1):
+        try:
+            raw_date = row.get("invoice_date", "").strip() or None
+            parsed_date = None
+            if raw_date:
+                from datetime import date as _date
+                parsed_date = _date.fromisoformat(raw_date)
+            inv = models.Invoice(
+                project_id=project_id,
+                invoice_number=row.get("invoice_number", "").strip(),
+                invoice_date=parsed_date,
+                invoice_value=Decimal(row.get("invoice_value", "0").strip().replace(",", "") or "0"),
+                currency=row.get("currency", "EUR").strip() or "EUR",
+            )
+            # Link customer by name if provided
+            cust_name = row.get("customer_name", "").strip()
+            if cust_name:
+                cust = db.query(models.Customer).filter(
+                    func.lower(models.Customer.full_name) == cust_name.lower()
+                ).first()
+                if cust:
+                    inv.customer_id = cust.id
+            # Link counterparty by name if provided
+            cp_name = row.get("counterparty_name", "").strip()
+            if cp_name:
+                cp = db.query(models.Counterparty).filter(
+                    func.lower(models.Counterparty.name) == cp_name.lower()
+                ).first()
+                if cp:
+                    inv.counterparty_id = cp.id
+            db.add(inv)
+            imported += 1
+        except Exception as e:
+            errors.append(f"Row {i}: {str(e)}")
+    db.commit()
+    return {"imported": imported, "errors": errors}
+
 @app.post("/transactions/{transaction_id}/link-invoice")
 def link_invoice_to_transaction(transaction_id: int, invoice_id: int, db: Session = Depends(get_db)):
     tx = db.query(models.Transaction).filter(models.Transaction.id == transaction_id).first()
