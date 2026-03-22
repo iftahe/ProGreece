@@ -21,7 +21,7 @@ A visual refresh of the ProGreece financial management app. The current design i
 |-------|-------|-------|
 | `primary-500` | `#6366f1` (Indigo) | Primary actions, active states, chart bars |
 | `primary-600` | `#4f46e5` | Hover states, darker accents |
-| `primary-gradient` | `#6366f1 → #8b5cf6` | Hero KPI, sidebar active, primary buttons |
+| `primary-gradient` | CSS class `.bg-primary-gradient` defined in `index.css` as `background: linear-gradient(135deg, #6366f1, #8b5cf6)` | Hero KPI, sidebar active, primary buttons |
 | `sidebar-bg` | `#1e1b4b` | Sidebar background (deep indigo) |
 | `sidebar-hover` | `#2e2a5e` | Sidebar hover state |
 | `sidebar-active` | gradient `#6366f1 → #8b5cf6` | Active nav item |
@@ -47,7 +47,7 @@ Font: Inter (unchanged)
 | Card headings | `text-sm font-bold` | 14px, weight 700 |
 | Labels | `text-xs uppercase tracking-wide text-gray-500` | 12px, uppercase |
 | Body text | `text-sm` | 14px, weight 400 |
-| Financial amounts | `tabular-nums font-semibold` | Monospace numerals |
+| Financial amounts | `font-mono tabular-nums font-semibold` | Monospace font family + weight 600 |
 
 ### Border Radius
 
@@ -95,16 +95,17 @@ Cards use `shadow-sm` only. No heavy shadows. Clean borders + subtle shadow.
 
 ### Buttons
 
-- **Primary**: gradient `#6366f1 → #8b5cf6`, white text, `rounded-lg`, hover darkens
+- **Primary**: `.bg-primary-gradient` background, white text, `rounded-lg`, hover via `filter brightness-90` transition
 - **Secondary**: white background, `border border-gray-200`, gray text, hover `bg-gray-50`
-- **Danger**: `bg-red-600`, white text (delete actions)
+- **Danger**: `bg-red-600`, white text, hover `bg-red-700` (delete actions)
 - All buttons use shared `.btn-primary`, `.btn-secondary`, `.btn-danger` classes — no inline Tailwind overrides
+- `.btn-danger` must be **created** in `src/index.css` (does not currently exist)
 
 ### Tables
 
 - Header: `text-xs uppercase tracking-wide text-gray-500`, bottom border
 - Body rows: white, no stripes
-- Hover: `border-l-3 border-indigo-500` left accent + `bg-indigo-50/30` subtle tint
+- Hover: `border-l-2 border-indigo-500` left accent + `bg-indigo-50/30` subtle tint
 - Amounts: green for income, red for expense, `font-semibold tabular-nums`
 - Pagination component used consistently across all table pages
 
@@ -123,35 +124,56 @@ Unified to one pattern (replacing current inconsistent implementations):
 - Error messages: `text-sm text-red-600` below the field
 - No inline styling overrides
 
-### Status Badges
-
-Unified pattern across all pages:
-
-| Status | Classes |
-|--------|---------|
-| Paid / Completed | `bg-emerald-100 text-emerald-700` |
-| Partial / Warning | `bg-amber-100 text-amber-700` |
-| Unpaid / Error | `bg-red-100 text-red-700` |
-| Active / Info | `bg-indigo-100 text-indigo-700` |
-
 ### Charts (Recharts)
 
-- Bar fill: gradient `#6366f1 → #818cf8`
-- Positive bars: indigo gradient
-- Negative bars: `#fca5a5` (light red)
+**Chart Color Rules:**
+- **Single-series bars** (e.g., forecast, budget timeline): indigo gradient `#6366f1 → #818cf8`
+- **Income bars**: keep `#10b981` (green) — semantic meaning must be preserved
+- **Expense bars**: keep `#dc2626` / `#fca5a5` (red/light red) — semantic meaning must be preserved
+- **Planned vs actual differentiation**: actual = solid color, planned = same color at 40% opacity
+- **Lines**: indigo `#6366f1` for primary trend lines
+
+**General:**
 - Grid lines: `#f3f4f6` (light gray)
 - Tooltip: white card, `shadow-lg`, `rounded-lg`
 
+**Implementation note:** Recharts gradient bars require an SVG `<defs>` block with `<linearGradient>` inside the chart, referenced via `fill="url(#gradientId)"`. Define a shared gradient ID (e.g., `indigo-bar-gradient`) reusable across chart components.
+
 ### Skeleton Loading
 
-- Unified skeleton component with indigo shimmer animation
+- Unified skeleton building blocks in `/src/components/Skeleton.jsx`
 - Replaces per-page skeleton implementations (SkeletonDashboard, SkeletonPortfolio, etc.)
-- Single reusable component in `/src/components/`
+- Shimmer animation uses indigo tint instead of gray
+- **Component API:**
+  - `<SkeletonBlock className="..." />` — basic shimmer rectangle, accepts className for sizing
+  - Each page composes `SkeletonBlock` elements to match its layout (e.g., 4 KPI blocks + chart block for dashboard)
+  - No complex variant props — keep it simple, each page arranges blocks as needed
 
 ### Empty States
 
-- Unified empty state component with indigo-tinted icon
-- Consistent messaging pattern and layout across all pages
+- Unified empty state in `/src/components/EmptyState.jsx`
+- Replaces per-page inline empty state implementations (e.g., the local `EmptyState` in Reports.jsx)
+- **Component API:**
+  - `<EmptyState icon={<IconComponent />} message="No data found" action={<button>...</button>} />`
+  - `icon`: optional, renders an indigo-tinted SVG icon
+  - `message`: required, the text to display
+  - `action`: optional, a call-to-action button
+
+### Status Badges
+
+- Shared component in `/src/components/StatusBadge.jsx`
+- **Component API:**
+  - `<StatusBadge variant="success|warning|danger|info">{label}</StatusBadge>`
+  - Each page maps its domain status strings to a variant (e.g., `"Paid" → "success"`, `"Overdue" → "danger"`)
+
+Unified color mapping:
+
+| Variant | Classes |
+|---------|---------|
+| `success` | `bg-emerald-100 text-emerald-700` |
+| `warning` | `bg-amber-100 text-amber-700` |
+| `danger` | `bg-red-100 text-red-700` |
+| `info` | `bg-indigo-100 text-indigo-700` |
 
 ## Page-Specific Changes
 
@@ -186,17 +208,23 @@ This is a visual refresh. No new features, no layout restructuring. Every page k
 - Timeline bars use indigo gradient
 - Plan vs actual structure unchanged
 
-### Reports (all 8 sub-reports)
+### Reports (all 8 sub-reports: P&L, Plan vs Actual, Invoice Details, Customer Transactions, Customer Balance, VAT, Withholding Tax, Payments by Project)
 
-- Charts switch to indigo gradient palette
+- Charts switch to indigo gradient palette (preserving income/expense semantic colors)
 - Tables get consistent hover style
-- Empty states use unified pattern with indigo accent
+- Replace the local inline `EmptyState` component in Reports.jsx with the shared `EmptyState` component
+- Filter bar restyled with `.input-field` class
 
 ### Invoices
 
 - Status badges unified
 - Table hover style applied
 - Import/create buttons use gradient primary
+
+### Projects
+
+- Admin table/card layout — apply new card styles, button classes
+- Status indicators use shared `StatusBadge` component
 
 ### Counterparties & Customers
 
