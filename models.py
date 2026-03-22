@@ -89,6 +89,7 @@ class BudgetCategory(Base):
     project_id = Column(Integer, ForeignKey("projects.id"))
     category_name = Column(Text)
     planned_amount = Column(Float)
+    planned_amount_v2 = Column(Numeric(18, 2), nullable=True)  # Revised plan
     category_type = Column(Text, default="expense", nullable=True)
 
     project = relationship("Project")

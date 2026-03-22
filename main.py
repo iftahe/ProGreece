@@ -32,6 +32,12 @@ try:
 except Exception as exc:
     print(f"[startup] phase4 migration note: {exc}")
 
+from migrations.plan_versioning_migrate import main as run_plan_versioning_migration
+try:
+    run_plan_versioning_migration()
+except Exception as exc:
+    print(f"[startup] plan versioning migration note: {exc}")
+
 # Create performance indexes
 with engine.connect() as conn:
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_tx_project_date ON transactions(project_id, date)"))
@@ -1895,20 +1901,22 @@ def get_plan_vs_actual_report(
     if project_id:
         filters_applied["project_id"] = project_id
 
-    # Get budget categories for this project
     categories_query = db.query(models.BudgetCategory)
     if project_id:
         categories_query = categories_query.filter(models.BudgetCategory.project_id == project_id)
     categories = categories_query.all()
 
     rows = []
-    total_planned = D('0')
+    total_plan1 = D('0')
+    total_plan2 = D('0')
     total_actual = D('0')
     total_vat = D('0')
     total_withholding = D('0')
 
     for cat in categories:
-        planned = D(str(cat.planned_amount or 0))
+        plan1 = D(str(cat.planned_amount or 0))
+        plan2_raw = getattr(cat, 'planned_amount_v2', None)
+        plan2 = D(str(plan2_raw)) if plan2_raw is not None else plan1  # Default to plan1 if no plan2
 
         tx_query = db.query(models.Transaction).filter(
             models.Transaction.budget_item_id == cat.id,
@@ -1926,13 +1934,16 @@ def get_plan_vs_actual_report(
 
         rows.append({
             "category": cat.category_name,
-            "planned": float(planned),
+            "plan1": float(plan1),
+            "plan2": float(plan2),
+            "plan1_plan2_diff": float(plan1 - plan2),
             "actual": float(actual),
-            "variance": float(planned - actual),
+            "plan2_actual_diff": float(plan2 - actual),
             "vat_amount": float(vat),
             "withholding_amount": float(withholding)
         })
-        total_planned += planned
+        total_plan1 += plan1
+        total_plan2 += plan2
         total_actual += actual
         total_vat += vat
         total_withholding += withholding
@@ -1940,9 +1951,11 @@ def get_plan_vs_actual_report(
     result = {
         "rows": rows,
         "totals": {
-            "planned": float(total_planned),
+            "plan1": float(total_plan1),
+            "plan2": float(total_plan2),
+            "plan1_plan2_diff": float(total_plan1 - total_plan2),
             "actual": float(total_actual),
-            "variance": float(total_planned - total_actual),
+            "plan2_actual_diff": float(total_plan2 - total_actual),
             "vat_amount": float(total_vat),
             "withholding_amount": float(total_withholding)
         },
@@ -1954,6 +1967,17 @@ def get_plan_vs_actual_report(
         return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                  headers={"Content-Disposition": "attachment; filename=Plan vs Actual.xlsx"})
     return result
+
+
+@app.patch("/budget-categories/{category_id}/plan2")
+def update_plan2(category_id: int, amount: float = Query(...), db: Session = Depends(get_db)):
+    cat = db.query(models.BudgetCategory).filter(models.BudgetCategory.id == category_id).first()
+    if not cat:
+        raise HTTPException(status_code=404, detail="Category not found")
+    cat.planned_amount_v2 = amount
+    db.commit()
+    db.refresh(cat)
+    return {"id": cat.id, "category_name": cat.category_name, "planned_amount_v2": float(cat.planned_amount_v2) if cat.planned_amount_v2 else None}
 
 
 # --- Report 4: Customer Transactions ---

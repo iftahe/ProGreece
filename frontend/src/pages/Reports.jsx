@@ -476,17 +476,23 @@ function PlanVsActualTab({ projects }) {
                                 <thead className="bg-slate-50">
                                     <tr>
                                         <Th>Category</Th>
-                                        <Th right>Planned</Th>
+                                        <Th right>Plan1 (Baseline)</Th>
+                                        <Th right>Plan2 (Revised)</Th>
+                                        <Th right>Plan1-Plan2 Diff</Th>
                                         <Th right>Actual</Th>
-                                        <Th right>Variance</Th>
+                                        <Th right>Plan2-Actual Diff</Th>
                                         <Th right>VAT Amount</Th>
                                         <Th right>Withholding</Th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100 bg-white">
                                     {rows.map((row, i) => {
-                                        const variance = row.variance ?? ((row.actual || 0) - (row.planned || 0));
-                                        const varClass = variance > 0 ? 'text-rose-600' : variance < 0 ? 'text-emerald-600' : 'text-gray-600';
+                                        const plan1Plan2Diff = row.plan1_plan2_diff ?? 0;
+                                        const plan2ActualDiff = row.plan2_actual_diff ?? 0;
+                                        // plan1-plan2 diff: positive = plan1 > plan2 (budget reduced), negative = plan1 < plan2 (budget increased)
+                                        const diff1Class = plan1Plan2Diff > 0 ? 'text-emerald-600' : plan1Plan2Diff < 0 ? 'text-rose-600' : 'text-gray-600';
+                                        // plan2-actual diff: positive = under budget (good), negative = over budget (bad)
+                                        const diff2Class = plan2ActualDiff > 0 ? 'text-emerald-600' : plan2ActualDiff < 0 ? 'text-rose-600' : 'text-gray-600';
                                         return (
                                             <tr
                                                 key={i}
@@ -494,11 +500,13 @@ function PlanVsActualTab({ projects }) {
                                                 onClick={() => setDrillDown(row.category || `Row ${i + 1}`)}
                                             >
                                                 <Td className="font-medium text-gray-900">{row.category || '-'}</Td>
-                                                <Td right>{fmt(row.planned)}</Td>
+                                                <Td right>{fmt(row.plan1)}</Td>
+                                                <Td right>{fmt(row.plan2)}</Td>
+                                                <Td right className={diff1Class}>{fmt(plan1Plan2Diff)}</Td>
                                                 <Td right>{fmt(row.actual)}</Td>
-                                                <Td right className={varClass}>{fmt(variance)}</Td>
+                                                <Td right className={diff2Class}>{fmt(plan2ActualDiff)}</Td>
                                                 <Td right>{fmt(row.vat_amount)}</Td>
-                                                <Td right>{fmt(row.withholding)}</Td>
+                                                <Td right>{fmt(row.withholding_amount)}</Td>
                                             </tr>
                                         );
                                     })}
@@ -506,11 +514,13 @@ function PlanVsActualTab({ projects }) {
                                 <tfoot className="bg-slate-100 border-t-2 border-gray-300">
                                     <tr>
                                         <TdTotal>Total ({rows.length} row{rows.length !== 1 ? 's' : ''})</TdTotal>
-                                        <TdTotal right>{fmt(totals?.total_planned    ?? rows.reduce((s, r) => s + (r.planned    || 0), 0))}</TdTotal>
-                                        <TdTotal right>{fmt(totals?.total_actual     ?? rows.reduce((s, r) => s + (r.actual     || 0), 0))}</TdTotal>
-                                        <TdTotal right>{fmt(totals?.total_variance   ?? rows.reduce((s, r) => s + (r.variance   || ((r.actual || 0) - (r.planned || 0))), 0))}</TdTotal>
-                                        <TdTotal right>{fmt(totals?.total_vat_amount ?? rows.reduce((s, r) => s + (r.vat_amount || 0), 0))}</TdTotal>
-                                        <TdTotal right>{fmt(totals?.total_withholding ?? rows.reduce((s, r) => s + (r.withholding || 0), 0))}</TdTotal>
+                                        <TdTotal right>{fmt(totals?.plan1    ?? rows.reduce((s, r) => s + (r.plan1    || 0), 0))}</TdTotal>
+                                        <TdTotal right>{fmt(totals?.plan2    ?? rows.reduce((s, r) => s + (r.plan2    || 0), 0))}</TdTotal>
+                                        <TdTotal right>{fmt(totals?.plan1_plan2_diff ?? rows.reduce((s, r) => s + (r.plan1_plan2_diff || 0), 0))}</TdTotal>
+                                        <TdTotal right>{fmt(totals?.actual   ?? rows.reduce((s, r) => s + (r.actual   || 0), 0))}</TdTotal>
+                                        <TdTotal right>{fmt(totals?.plan2_actual_diff ?? rows.reduce((s, r) => s + (r.plan2_actual_diff || 0), 0))}</TdTotal>
+                                        <TdTotal right>{fmt(totals?.vat_amount ?? rows.reduce((s, r) => s + (r.vat_amount || 0), 0))}</TdTotal>
+                                        <TdTotal right>{fmt(totals?.withholding_amount ?? rows.reduce((s, r) => s + (r.withholding_amount || 0), 0))}</TdTotal>
                                     </tr>
                                 </tfoot>
                             </table>
