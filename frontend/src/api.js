@@ -213,13 +213,12 @@ export const runBudgetMapper = async (projectId, { dryRun = true } = {}) => {
     return response.data;
 };
 
-export const bulkAssignBudget = async (transactionIds, budgetCategoryId) => {
-    const response = await api.put('/admin/bulk-assign-budget', {
+export const bulkAssignBudget = (transactionIds, budgetCategoryId, direction = null) =>
+    api.put('/admin/bulk-assign-budget', {
         transaction_ids: transactionIds,
         budget_category_id: budgetCategoryId,
-    });
-    return response.data;
-};
+        ...(direction && { direction }),
+    }).then(r => r.data);
 
 // --- Counterparties ---
 

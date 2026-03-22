@@ -101,6 +101,7 @@ class BudgetCategory(BudgetCategoryBase):
 class BulkAssignBudget(BaseModel):
     transaction_ids: List[int]
     budget_category_id: int
+    direction: Optional[str] = None  # 'in' or 'out'
 
 # --- Payment Method Enum ---
 class PaymentMethodEnum(str, Enum):

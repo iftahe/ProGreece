@@ -1241,6 +1241,19 @@ def _match_transaction_to_category(tx, budget_categories):
     return best_match if best_match else (None, None, None)
 
 
+def _resolve_to_account(tx, db):
+    """Get the to_account display name from counterparty or account."""
+    if tx.counterparty_id:
+        cp = db.query(models.Counterparty).filter(models.Counterparty.id == tx.counterparty_id).first()
+        if cp:
+            return cp.name
+    if tx.to_account_id:
+        acc = db.query(models.Account).filter(models.Account.id == tx.to_account_id).first()
+        if acc:
+            return acc.name
+    return tx.supplier or ""
+
+
 @app.post("/admin/budget-mapper/{project_id}")
 def bulk_budget_mapper(
     project_id: int,
@@ -1282,6 +1295,8 @@ def bulk_budget_mapper(
                 "mapped_to_id": cat_id,
                 "mapped_to_name": cat_name,
                 "match_method": method,
+                "to_account": _resolve_to_account(tx, db),
+                "direction": tx.direction or "out",
             })
 
             if not dry_run:
@@ -1294,6 +1309,8 @@ def bulk_budget_mapper(
                 "amount": float(tx.amount) if tx.amount else 0,
                 "category_field": tx.category,
                 "description": tx.description or tx.remarks,
+                "to_account": _resolve_to_account(tx, db),
+                "direction": tx.direction or "out",
             })
 
     if not dry_run and updated_count > 0:
@@ -1336,9 +1353,14 @@ def bulk_assign_budget(
     if not category:
         raise HTTPException(status_code=404, detail="Budget category not found")
 
+    update_fields = {models.Transaction.budget_item_id: payload.budget_category_id}
+    if payload.direction and payload.direction in ('in', 'out'):
+        update_fields[models.Transaction.direction] = payload.direction
+        update_fields[models.Transaction.type] = 'income' if payload.direction == 'in' else 'expense'
+
     updated = db.query(models.Transaction).filter(
         models.Transaction.id.in_(payload.transaction_ids)
-    ).update({models.Transaction.budget_item_id: payload.budget_category_id}, synchronize_session="fetch")
+    ).update(update_fields, synchronize_session="fetch")
 
     db.commit()
 

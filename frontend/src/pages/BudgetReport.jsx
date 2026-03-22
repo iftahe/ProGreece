@@ -150,6 +150,7 @@ const BudgetMapperPanel = ({ projectId, onMappingApplied }) => {
     const [categories, setCategories] = useState([]);
     const [assignCategoryId, setAssignCategoryId] = useState('');
     const [assigning, setAssigning] = useState(false);
+    const [directionOverrides, setDirectionOverrides] = useState({});
 
     const handlePreview = async () => {
         setLoading(true);
@@ -210,9 +211,24 @@ const BudgetMapperPanel = ({ projectId, onMappingApplied }) => {
         setAssigning(true);
         setError(null);
         try {
-            await bulkAssignBudget([...selectedIds], Number(assignCategoryId));
+            // Group selected transaction IDs by their direction override
+            const groups = {};
+            for (const id of selectedIds) {
+                const txDirection = directionOverrides[id] || (result?.unmatched?.find(u => u.transaction_id === id)?.direction) || null;
+                const key = txDirection || 'default';
+                if (!groups[key]) groups[key] = [];
+                groups[key].push(id);
+            }
+
+            // Send one request per direction group
+            for (const [dirKey, ids] of Object.entries(groups)) {
+                const direction = dirKey === 'default' ? null : dirKey;
+                await bulkAssignBudget(ids, Number(assignCategoryId), direction);
+            }
+
             setSelectedIds(new Set());
             setAssignCategoryId('');
+            setDirectionOverrides({});
             await handlePreview();
             onMappingApplied();
         } catch (err) {
@@ -386,7 +402,9 @@ const BudgetMapperPanel = ({ projectId, onMappingApplied }) => {
                                                     <th className="px-3 py-2 text-left text-gray-500">Date</th>
                                                     <th className="px-3 py-2 text-left text-gray-500">Category</th>
                                                     <th className="px-3 py-2 text-left text-gray-500">Description</th>
+                                                    <th className="px-3 py-2 text-left text-gray-500">To Account</th>
                                                     <th className="px-3 py-2 text-right text-gray-500">Amount</th>
+                                                    <th className="px-3 py-2 text-left text-gray-500">Type</th>
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-amber-100">
@@ -409,8 +427,21 @@ const BudgetMapperPanel = ({ projectId, onMappingApplied }) => {
                                                         <td className="px-3 py-1.5 text-gray-600 max-w-[200px] truncate">
                                                             {u.description || '-'}
                                                         </td>
+                                                        <td className="px-3 py-1.5 text-gray-500 max-w-[150px] truncate">
+                                                            {u.to_account || '-'}
+                                                        </td>
                                                         <td className="px-3 py-1.5 text-right font-medium text-gray-900 amount">
                                                             {formatEUR(u.amount)}
+                                                        </td>
+                                                        <td className="px-3 py-1.5">
+                                                            <select
+                                                                value={directionOverrides[u.transaction_id] ?? u.direction ?? 'out'}
+                                                                onChange={e => setDirectionOverrides(prev => ({ ...prev, [u.transaction_id]: e.target.value }))}
+                                                                className="input text-xs py-0.5 px-1 w-24"
+                                                            >
+                                                                <option value="out">Expense</option>
+                                                                <option value="in">Income</option>
+                                                            </select>
                                                         </td>
                                                     </tr>
                                                 ))}
