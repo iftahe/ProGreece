@@ -1373,6 +1373,50 @@ def bulk_assign_budget(
     return {"updated": updated, "budget_category_id": payload.budget_category_id, "category_name": category.category_name}
 
 
+@app.post("/admin/backfill-vat")
+def backfill_vat(
+    project_id: int,
+    vat_rate: float = Query(0.24, description="VAT rate to apply (e.g. 0.24 for 24%)"),
+    db: Session = Depends(get_db)
+):
+    """Backfill vat_amount = amount * vat_rate for transactions missing VAT data."""
+    txs = db.query(models.Transaction).filter(
+        models.Transaction.project_id == project_id,
+        models.Transaction.direction == 'out',
+        or_(models.Transaction.vat_amount == None, models.Transaction.vat_amount == 0)
+    ).all()
+    updated = 0
+    for tx in txs:
+        if tx.amount and float(tx.amount) > 0:
+            tx.vat_amount = float(tx.amount) * vat_rate
+            tx.vat_rate = vat_rate
+            updated += 1
+    db.commit()
+    return {"updated": updated, "vat_rate_applied": vat_rate}
+
+
+@app.post("/admin/backfill-withholding")
+def backfill_withholding(
+    project_id: int,
+    withholding_rate: float = Query(0.03, description="Withholding rate (e.g. 0.03 for 3%)"),
+    db: Session = Depends(get_db)
+):
+    """Backfill withholding_amount = amount * rate for transactions missing withholding data."""
+    txs = db.query(models.Transaction).filter(
+        models.Transaction.project_id == project_id,
+        models.Transaction.direction == 'out',
+        or_(models.Transaction.withholding_amount == None, models.Transaction.withholding_amount == 0)
+    ).all()
+    updated = 0
+    for tx in txs:
+        if tx.amount and float(tx.amount) > 0:
+            tx.withholding_amount = float(tx.amount) * withholding_rate
+            tx.withholding_rate = withholding_rate
+            updated += 1
+    db.commit()
+    return {"updated": updated, "withholding_rate_applied": withholding_rate}
+
+
 # --- Counterparties ---
 
 @app.get("/counterparties/", response_model=List[schemas.Counterparty])
@@ -2163,6 +2207,8 @@ def get_vat_report(
         "drilldown_supported": False,
         "filters_applied": filters_applied
     }
+    if not rows:
+        result["message"] = "No transactions with VAT data found. Ensure VAT amounts are populated during transaction import or entry."
     if format == "xlsx":
         buf = export_to_excel("VAT Report", result["rows"], result.get("totals"), filters_applied)
         return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -2231,6 +2277,8 @@ def get_withholding_report(
         "drilldown_supported": False,
         "filters_applied": filters_applied
     }
+    if not rows:
+        result["message"] = "No transactions with withholding data found. Ensure withholding amounts are populated during transaction import or entry."
     if format == "xlsx":
         buf = export_to_excel("Withholding Tax", result["rows"], result.get("totals"), filters_applied)
         return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
