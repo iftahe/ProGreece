@@ -113,58 +113,6 @@ def health_check():
     return status
 
 
-@app.get("/debug/test-endpoints")
-def debug_test_endpoints():
-    """Temporary diagnostic: test failing endpoints and capture tracebacks."""
-    import traceback, time, sys
-    results = {
-        "python_version": sys.version,
-        "fastapi_version": getattr(__import__("fastapi"), "__version__", "?"),
-        "sqlalchemy_version": getattr(__import__("sqlalchemy"), "__version__", "?"),
-        "pydantic_version": getattr(__import__("pydantic"), "__version__", "?"),
-    }
-    db = SessionLocal()
-    try:
-        # Test 1: Portfolio Summary
-        try:
-            t0 = time.time()
-            data = get_portfolio_summary(db)
-            results["portfolio_summary"] = {"status": "ok", "project_count": len(data.get("projects", [])), "time_s": round(time.time() - t0, 2)}
-        except Exception as e:
-            results["portfolio_summary"] = {"status": "error", "error": str(e), "traceback": traceback.format_exc()}
-
-        # Test 2: P&L Report
-        try:
-            t0 = time.time()
-            data = get_pnl_report(db=db)
-            results["pnl"] = {"status": "ok", "row_count": len(data.get("rows", [])), "time_s": round(time.time() - t0, 2)}
-        except Exception as e:
-            results["pnl"] = {"status": "error", "error": str(e), "traceback": traceback.format_exc()}
-
-        # Test 3: Plan vs Actual
-        try:
-            t0 = time.time()
-            data = get_plan_vs_actual_report(db=db)
-            results["plan_vs_actual"] = {"status": "ok", "row_count": len(data.get("rows", [])), "time_s": round(time.time() - t0, 2)}
-        except Exception as e:
-            results["plan_vs_actual"] = {"status": "error", "error": str(e), "traceback": traceback.format_exc()}
-
-        # Test 4: DB schema check
-        try:
-            from sqlalchemy import inspect as sa_inspect
-            inspector = sa_inspect(engine)
-            tx_cols = [c["name"] for c in inspector.get_columns("transactions")]
-            results["tx_columns"] = tx_cols
-            tables = inspector.get_table_names()
-            results["tables"] = tables
-        except Exception as e:
-            results["schema_check"] = {"error": str(e)}
-
-    finally:
-        db.close()
-    return results
-
-
 @app.get("/projects/", response_model=List[schemas.Project])
 def read_projects(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     projects = db.query(models.Project).offset(skip).limit(limit).all()
