@@ -84,6 +84,7 @@ class Transaction(TransactionBase):
 class BudgetCategoryBase(BaseModel):
     category_name: str
     planned_amount: float
+    category_type: Optional[str] = None
 
 class BudgetCategoryCreate(BudgetCategoryBase):
     project_id: int

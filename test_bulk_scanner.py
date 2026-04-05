@@ -191,6 +191,46 @@ class TestScannerReturnsFromAccount:
         assert item["type"] == "expense"
 
 
+class TestMappingsHaveFromAccount:
+    """Scanner endpoint returns from_account in matched (mappings) items."""
+
+    def test_matched_mapping_has_from_account(self, client, db, project_with_category):
+        """Transaction that keyword-matches a budget category includes from_account in mappings."""
+        account = models.Account(name="Eurobank", is_system_account=0)
+        db.add(account)
+        db.commit()
+        db.refresh(account)
+
+        # Use category name "Materials" in the description so the matcher picks it up
+        tx = models.Transaction(
+            project_id=project_with_category["project"]["id"],
+            date=date(2025, 6, 1),
+            amount=2000,
+            description="Materials purchase from warehouse",
+            budget_item_id=None,
+            from_account_id=account.id,
+            direction="out",
+            type="expense",
+        )
+        db.add(tx)
+        db.commit()
+        db.refresh(tx)
+
+        project_id = project_with_category["project"]["id"]
+        res = client.post(f"/admin/budget-mapper/{project_id}?dry_run=true")
+        assert res.status_code == 200
+        data = res.json()
+
+        assert data["total_matched"] >= 1
+        mapping = next(
+            (m for m in data["mappings"] if m["transaction_id"] == tx.id),
+            None,
+        )
+        assert mapping is not None, "Transaction should appear in mappings list"
+        assert "from_account" in mapping
+        assert mapping["from_account"] == "Eurobank"
+
+
 class TestScannerReturnsDirection:
     """Scanner endpoint returns direction field in unmatched items."""
 
