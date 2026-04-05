@@ -2005,7 +2005,8 @@ def get_pnl_report(
         "filters_applied": filters_applied
     }
     if format == "xlsx":
-        buf = export_to_excel("PnL Report", result["rows"], result.get("totals"), filters_applied)
+        from services.export_service import export_pnl_reference_format
+        buf = export_pnl_reference_format(result["rows"], result.get("totals"), filters_applied)
         return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                  headers={"Content-Disposition": "attachment; filename=PnL Report.xlsx"})
     return result
