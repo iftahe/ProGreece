@@ -1373,6 +1373,15 @@ def _resolve_to_account(tx, db):
     return tx.supplier or ""
 
 
+def _resolve_from_account(tx, db):
+    """Get the from_account display name from account table."""
+    if tx.from_account_id:
+        acc = db.query(models.Account).filter(models.Account.id == tx.from_account_id).first()
+        if acc:
+            return acc.name
+    return ""
+
+
 @app.post("/admin/budget-mapper/{project_id}")
 def bulk_budget_mapper(
     project_id: int,
@@ -1415,6 +1424,8 @@ def bulk_budget_mapper(
                 "mapped_to_name": cat_name,
                 "match_method": method,
                 "to_account": _resolve_to_account(tx, db),
+                "from_account": _resolve_from_account(tx, db),
+                "type": tx.type or "",
                 "direction": tx.direction or "out",
             })
 
@@ -1429,6 +1440,8 @@ def bulk_budget_mapper(
                 "category_field": tx.category,
                 "description": tx.description or tx.remarks,
                 "to_account": _resolve_to_account(tx, db),
+                "from_account": _resolve_from_account(tx, db),
+                "type": tx.type or "",
                 "direction": tx.direction or "out",
             })
 

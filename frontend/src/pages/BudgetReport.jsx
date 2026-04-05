@@ -330,6 +330,7 @@ const BudgetMapperPanel = ({ projectId, onMappingApplied }) => {
                                             <thead className="bg-slate-50 sticky top-0">
                                                 <tr>
                                                     <th className="px-3 py-2 text-left text-gray-500">Date</th>
+                                                    <th className="px-3 py-2 text-left text-gray-500">From Account</th>
                                                     <th className="px-3 py-2 text-left text-gray-500">Description</th>
                                                     <th className="px-3 py-2 text-right text-gray-500">Amount</th>
                                                     <th className="px-3 py-2 text-left text-gray-500">Maps To</th>
@@ -341,6 +342,9 @@ const BudgetMapperPanel = ({ projectId, onMappingApplied }) => {
                                                     <tr key={m.transaction_id} className="hover:bg-gray-50">
                                                         <td className="px-3 py-1.5 whitespace-nowrap text-gray-600">
                                                             {m.date ? new Date(m.date).toLocaleDateString('en-GB') : '-'}
+                                                        </td>
+                                                        <td className="px-3 py-1.5 text-gray-500 max-w-[150px] truncate">
+                                                            {m.from_account || '-'}
                                                         </td>
                                                         <td className="px-3 py-1.5 text-gray-600 max-w-[200px] truncate">
                                                             {m.description || m.category_field || '-'}
@@ -375,9 +379,21 @@ const BudgetMapperPanel = ({ projectId, onMappingApplied }) => {
                                             className="input text-xs py-1.5 max-w-xs"
                                         >
                                             <option value="">Select budget category...</option>
-                                            {categories.map(c => (
-                                                <option key={c.id} value={c.id}>{c.category_name}</option>
-                                            ))}
+                                            {categories
+                                                .filter(c => {
+                                                    if (selectedIds.size === 0) return true;
+                                                    const selectedTxs = result?.unmatched?.filter(u => selectedIds.has(u.transaction_id)) || [];
+                                                    const directions = new Set(selectedTxs.map(t => directionOverrides[t.transaction_id] ?? t.direction ?? 'out'));
+                                                    if (directions.size === 1) {
+                                                        const dir = [...directions][0];
+                                                        if (dir === 'in') return c.category_type === 'income';
+                                                        if (dir === 'out') return c.category_type !== 'income';
+                                                    }
+                                                    return true;
+                                                })
+                                                .map(c => (
+                                                    <option key={c.id} value={c.id}>{c.category_name}</option>
+                                                ))}
                                         </select>
                                         <button
                                             onClick={handleBulkAssign}
@@ -400,6 +416,7 @@ const BudgetMapperPanel = ({ projectId, onMappingApplied }) => {
                                                         />
                                                     </th>
                                                     <th className="px-3 py-2 text-left text-gray-500">Date</th>
+                                                    <th className="px-3 py-2 text-left text-gray-500">From Account</th>
                                                     <th className="px-3 py-2 text-left text-gray-500">Category</th>
                                                     <th className="px-3 py-2 text-left text-gray-500">Description</th>
                                                     <th className="px-3 py-2 text-left text-gray-500">To Account</th>
@@ -420,6 +437,9 @@ const BudgetMapperPanel = ({ projectId, onMappingApplied }) => {
                                                         </td>
                                                         <td className="px-3 py-1.5 whitespace-nowrap text-gray-600">
                                                             {u.date ? new Date(u.date).toLocaleDateString('en-GB') : '-'}
+                                                        </td>
+                                                        <td className="px-3 py-1.5 text-gray-500 max-w-[150px] truncate">
+                                                            {u.from_account || '-'}
                                                         </td>
                                                         <td className="px-3 py-1.5 text-gray-500 max-w-[120px] truncate">
                                                             {u.category_field || '-'}

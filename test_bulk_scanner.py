@@ -133,6 +133,64 @@ class TestScannerReturnsToAccount:
         assert item["to_account"] == ""
 
 
+class TestScannerReturnsFromAccount:
+    """Scanner endpoint returns from_account field in unmatched items."""
+
+    def test_unmatched_has_from_account(self, client, db, project_with_category):
+        """Transaction with from_account_id returns account name."""
+        account = models.Account(name="Alpha Bank", is_system_account=0)
+        db.add(account)
+        db.commit()
+        db.refresh(account)
+
+        tx = models.Transaction(
+            project_id=project_with_category["project"]["id"],
+            date=date(2025, 5, 1),
+            amount=3000,
+            description="Wire transfer",
+            budget_item_id=None,
+            from_account_id=account.id,
+            direction="out",
+            type="expense",
+        )
+        db.add(tx)
+        db.commit()
+        db.refresh(tx)
+
+        project_id = project_with_category["project"]["id"]
+        res = client.post(f"/admin/budget-mapper/{project_id}?dry_run=true")
+        assert res.status_code == 200
+        data = res.json()
+
+        item = next((u for u in data["unmatched"] if u["transaction_id"] == tx.id), None)
+        assert item is not None
+        assert "from_account" in item
+        assert item["from_account"] == "Alpha Bank"
+
+    def test_unmatched_from_account_empty_when_missing(self, client, project_with_category, unmapped_transaction):
+        """Transaction without from_account_id returns empty string."""
+        project_id = project_with_category["project"]["id"]
+        res = client.post(f"/admin/budget-mapper/{project_id}?dry_run=true")
+        assert res.status_code == 200
+        data = res.json()
+
+        item = next((u for u in data["unmatched"] if u["transaction_id"] == unmapped_transaction.id), None)
+        assert item is not None
+        assert item["from_account"] == ""
+
+    def test_unmatched_has_type_field(self, client, project_with_category, unmapped_transaction):
+        """Transaction returns type field."""
+        project_id = project_with_category["project"]["id"]
+        res = client.post(f"/admin/budget-mapper/{project_id}?dry_run=true")
+        assert res.status_code == 200
+        data = res.json()
+
+        item = next((u for u in data["unmatched"] if u["transaction_id"] == unmapped_transaction.id), None)
+        assert item is not None
+        assert "type" in item
+        assert item["type"] == "expense"
+
+
 class TestScannerReturnsDirection:
     """Scanner endpoint returns direction field in unmatched items."""
 
