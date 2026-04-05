@@ -1500,6 +1500,18 @@ def bulk_assign_budget(
 
     db.commit()
 
+    # Backfill vat_amount/withholding_amount from rates for assigned transactions
+    backfill_needed = False
+    for tx in db.query(models.Transaction).filter(models.Transaction.id.in_(payload.transaction_ids)).all():
+        if (tx.vat_amount is None or float(tx.vat_amount) == 0) and tx.vat_rate and float(tx.vat_rate) > 0:
+            tx.vat_amount = float(tx.amount or 0) * float(tx.vat_rate)
+            backfill_needed = True
+        if (tx.withholding_amount is None or float(tx.withholding_amount) == 0) and tx.withholding_rate and float(tx.withholding_rate) > 0:
+            tx.withholding_amount = float(tx.amount or 0) * float(tx.withholding_rate)
+            backfill_needed = True
+    if backfill_needed:
+        db.commit()
+
     return {"updated": updated, "budget_category_id": payload.budget_category_id, "category_name": category.category_name}
 
 
@@ -1915,7 +1927,11 @@ def get_pnl_report(
         cp_name = resolve_counterparty(tx)
         amount = D(str(tx.amount or 0))
         vat = D(str(tx.vat_amount or 0))
+        if vat == 0 and tx.vat_rate and float(tx.vat_rate) > 0:
+            vat = amount * D(str(tx.vat_rate))
         withholding = D(str(tx.withholding_amount or 0))
+        if withholding == 0 and tx.withholding_rate and float(tx.withholding_rate) > 0:
+            withholding = amount * D(str(tx.withholding_rate))
 
         if cat_name not in sections[section]:
             sections[section][cat_name] = OrderedDict()
@@ -2053,9 +2069,20 @@ def get_plan_vs_actual_report(
             tx_query = tx_query.filter(models.Transaction.status == 'executed')
 
         txs = tx_query.all()
-        actual = sum(D(str(tx.amount or 0)) for tx in txs)
-        vat = sum(D(str(tx.vat_amount or 0)) for tx in txs)
-        withholding = sum(D(str(tx.withholding_amount or 0)) for tx in txs)
+        actual = D('0')
+        vat = D('0')
+        withholding = D('0')
+        for tx in txs:
+            amt = D(str(tx.amount or 0))
+            actual += amt
+            tx_vat = D(str(tx.vat_amount or 0))
+            if tx_vat == 0 and tx.vat_rate and float(tx.vat_rate) > 0:
+                tx_vat = amt * D(str(tx.vat_rate))
+            vat += tx_vat
+            tx_wh = D(str(tx.withholding_amount or 0))
+            if tx_wh == 0 and tx.withholding_rate and float(tx.withholding_rate) > 0:
+                tx_wh = amt * D(str(tx.withholding_rate))
+            withholding += tx_wh
 
         rows.append({
             "category": cat.category_name,

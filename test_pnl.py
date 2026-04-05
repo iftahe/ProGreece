@@ -95,3 +95,29 @@ def test_pnl_sections_are_income_then_expense(client, db):
     assert len(headers) == 2
     assert headers[0]["section"] == "income"
     assert headers[1]["section"] == "expense"
+
+
+def test_pnl_vat_fallback_from_rate(client, db):
+    """P&L must compute vat_value from vat_rate if vat_amount is 0."""
+    from datetime import datetime
+    project = models.Project(name="VAT Test", status="Active")
+    db.add(project)
+    db.flush()
+    cat = models.BudgetCategory(project_id=project.id, category_name="Construction", planned_amount=100000, category_type="expense")
+    db.add(cat)
+    db.flush()
+    tx = models.Transaction(
+        project_id=project.id, date=datetime(2024, 6, 1), amount=10000,
+        direction='out', status='executed', budget_item_id=cat.id,
+        vat_rate=0.24, vat_amount=0, withholding_rate=0.03, withholding_amount=0
+    )
+    db.add(tx)
+    db.commit()
+
+    resp = client.get(f"/reports/pnl?project_id={project.id}")
+    assert resp.status_code == 200
+    data = resp.json()
+    detail = [r for r in data["rows"] if r["row_type"] == "detail"]
+    assert len(detail) >= 1
+    assert detail[0]["vat_value"] == 2400.0  # 10000 * 0.24
+    assert detail[0]["withholding_value"] == 300.0  # 10000 * 0.03
