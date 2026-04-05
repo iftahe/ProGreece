@@ -356,3 +356,62 @@ class TestBulkAssignAcceptsDirection:
             assert tx.direction == "out"
             assert tx.type == "expense"
             assert tx.budget_item_id == category_id
+
+
+class TestBulkAssignSetsStatusExecuted:
+    """Bulk assign endpoint must set status='executed' so reports include the transactions."""
+
+    def test_bulk_assign_sets_status_executed(self, client, db, project_with_category):
+        """After bulk-assign, transaction.status must be 'executed' so reports include it."""
+        tx = models.Transaction(
+            project_id=project_with_category["project"]["id"],
+            date=date(2025, 1, 20),
+            amount=5000,
+            direction="out",
+            status=None,
+            budget_item_id=None,
+        )
+        db.add(tx)
+        db.commit()
+        db.refresh(tx)
+
+        category_id = project_with_category["category"].id
+        response = client.put("/admin/bulk-assign-budget", json={
+            "transaction_ids": [tx.id],
+            "budget_category_id": category_id,
+            "direction": "out",
+        })
+        assert response.status_code == 200
+
+        db.expire_all()
+        tx = db.query(models.Transaction).filter(models.Transaction.id == tx.id).first()
+        assert tx.status == "executed"
+        assert tx.budget_item_id == category_id
+        assert tx.direction == "out"
+        assert tx.type == "expense"
+
+    def test_bulk_assign_overwrites_existing_status(self, client, db, project_with_category):
+        """Even if status was something else, bulk-assign should set it to 'executed'."""
+        tx = models.Transaction(
+            project_id=project_with_category["project"]["id"],
+            date=date(2025, 1, 25),
+            amount=3000,
+            direction="in",
+            status="pending",
+            budget_item_id=None,
+        )
+        db.add(tx)
+        db.commit()
+        db.refresh(tx)
+
+        category_id = project_with_category["category"].id
+        response = client.put("/admin/bulk-assign-budget", json={
+            "transaction_ids": [tx.id],
+            "budget_category_id": category_id,
+            "direction": "in",
+        })
+        assert response.status_code == 200
+
+        db.expire_all()
+        tx = db.query(models.Transaction).filter(models.Transaction.id == tx.id).first()
+        assert tx.status == "executed"

@@ -1427,6 +1427,7 @@ def bulk_budget_mapper(
                 "from_account": _resolve_from_account(tx, db),
                 "type": tx.type or "",
                 "direction": tx.direction or "out",
+                "status": tx.status or "",
             })
 
             if not dry_run:
@@ -1443,6 +1444,7 @@ def bulk_budget_mapper(
                 "from_account": _resolve_from_account(tx, db),
                 "type": tx.type or "",
                 "direction": tx.direction or "out",
+                "status": tx.status or "",
             })
 
     if not dry_run and updated_count > 0:
@@ -1489,6 +1491,8 @@ def bulk_assign_budget(
     if payload.direction and payload.direction in ('in', 'out'):
         update_fields[models.Transaction.direction] = payload.direction
         update_fields[models.Transaction.type] = 'income' if payload.direction == 'in' else 'expense'
+    # Ensure status is 'executed' so reports include these transactions
+    update_fields[models.Transaction.status] = 'executed'
 
     updated = db.query(models.Transaction).filter(
         models.Transaction.id.in_(payload.transaction_ids)
