@@ -685,11 +685,11 @@ def get_portfolio_summary(db: Session = Depends(get_db)):
         ).scalar() or 0
         total_budget = float(total_budget)
 
-        # Actual spending: sum of expense transactions (executed only)
+        # Actual spending: sum of outflow transactions (executed only)
         actual_spent = db.query(func.sum(models.Transaction.amount)).filter(
             models.Transaction.project_id == project.id,
             models.Transaction.transaction_type == 1,
-            models.Transaction.type == "expense"
+            models.Transaction.direction == "out"
         ).scalar() or 0
         actual_spent = float(actual_spent)
 
