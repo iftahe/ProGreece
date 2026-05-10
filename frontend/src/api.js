@@ -22,6 +22,11 @@ export const getBudgetCategories = async (projectId) => {
     return response.data;
 };
 
+export const createBudgetCategory = async (data) => {
+    const response = await api.post('/budget-categories/', data);
+    return response.data;
+};
+
 export const updateBudgetCategory = async (itemId, amount) => {
     const response = await api.put(`/budget-categories/${itemId}`, { planned_amount: amount });
     return response.data;

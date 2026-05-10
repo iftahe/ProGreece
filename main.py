@@ -154,6 +154,17 @@ def create_project(project: schemas.ProjectCreate, db: Session = Depends(get_db)
     db.add(db_project)
     db.commit()
     db.refresh(db_project)
+
+    SEED_INCOME_CATEGORIES = ["Apartment Sale", "Trust Deposit", "Customer Payment", "ProGreece Income"]
+    for cat_name in SEED_INCOME_CATEGORIES:
+        db.add(models.BudgetCategory(
+            project_id=db_project.id,
+            category_name=cat_name,
+            planned_amount=0,
+            category_type="income",
+        ))
+    db.commit()
+
     return db_project
 
 @app.put("/projects/{project_id}", response_model=schemas.Project)
@@ -502,6 +513,23 @@ def update_budget_category(category_id: int, update: schemas.BudgetCategoryUpdat
     db.commit()
     db.refresh(db_category)
     return db_category
+
+@app.post("/budget-categories/", response_model=schemas.BudgetCategory)
+def create_budget_category(payload: schemas.BudgetCategoryCreate, db: Session = Depends(get_db)):
+    """Create a new budget category for a project."""
+    project = db.query(models.Project).filter(models.Project.id == payload.project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    cat = models.BudgetCategory(
+        project_id=payload.project_id,
+        category_name=payload.category_name,
+        planned_amount=payload.planned_amount,
+        category_type=payload.category_type or "expense",
+    )
+    db.add(cat)
+    db.commit()
+    db.refresh(cat)
+    return cat
 
 # --- Accounts ---
 
@@ -1304,11 +1332,36 @@ def _normalize(s):
         return ""
     return " ".join(str(s).strip().lower().split())
 
-def _match_transaction_to_category(tx, budget_categories):
+def _match_transaction_to_category(tx, budget_categories, db=None):
     """
     Try to match a transaction to a budget category using keyword heuristics.
     Returns (category_id, category_name, match_method) or (None, None, None).
     """
+    tx_direction = tx.direction or 'out'
+    expected_type = 'income' if tx_direction == 'in' else 'expense'
+
+    # Filter categories by direction-compatible type before scoring
+    filtered_cats = [
+        cat for cat in budget_categories
+        if (cat.category_type or 'expense') == expected_type
+    ]
+
+    # Learning loop: check AccountCategoryMapping before heuristics
+    if db is not None:
+        lookup_account_id = tx.from_account_id or tx.counterparty_id
+        if lookup_account_id:
+            learned = db.query(models.AccountCategoryMapping).filter(
+                models.AccountCategoryMapping.account_id == lookup_account_id,
+            ).order_by(models.AccountCategoryMapping.last_used.desc()).first()
+            if learned:
+                # Verify the learned category is in our direction-filtered set
+                matched_cat = next(
+                    (c for c in filtered_cats if c.id == learned.budget_category_id),
+                    None,
+                )
+                if matched_cat:
+                    return (matched_cat.id, matched_cat.category_name, "learned_mapping")
+
     # Collect searchable text from the transaction
     tx_category = _normalize(tx.category)
     tx_description = _normalize(tx.description)
@@ -1317,7 +1370,7 @@ def _match_transaction_to_category(tx, budget_categories):
     best_match = None
     best_score = 0
 
-    for cat in budget_categories:
+    for cat in filtered_cats:
         cat_name_norm = _normalize(cat.category_name)
         if not cat_name_norm:
             continue
@@ -1411,7 +1464,7 @@ def bulk_budget_mapper(
     updated_count = 0
 
     for tx in unmapped_txs:
-        cat_id, cat_name, method = _match_transaction_to_category(tx, budget_categories)
+        cat_id, cat_name, method = _match_transaction_to_category(tx, budget_categories, db=db)
 
         if cat_id:
             mappings.append({
@@ -1487,6 +1540,15 @@ def bulk_assign_budget(
     if not category:
         raise HTTPException(status_code=404, detail="Budget category not found")
 
+    if payload.direction and payload.direction in ('in', 'out'):
+        expected_type = 'income' if payload.direction == 'in' else 'expense'
+        if (category.category_type or 'expense') != expected_type:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot assign {payload.direction} transactions to a "
+                       f"{category.category_type or 'expense'} category"
+            )
+
     update_fields = {models.Transaction.budget_item_id: payload.budget_category_id}
     if payload.direction and payload.direction in ('in', 'out'):
         update_fields[models.Transaction.direction] = payload.direction
@@ -1511,6 +1573,24 @@ def bulk_assign_budget(
             backfill_needed = True
     if backfill_needed:
         db.commit()
+
+    # Learning loop: upsert account→category mapping for each assigned transaction
+    for tx in db.query(models.Transaction).filter(models.Transaction.id.in_(payload.transaction_ids)).all():
+        acct_id = tx.from_account_id
+        if acct_id and tx.budget_item_id:
+            existing = db.query(models.AccountCategoryMapping).filter(
+                models.AccountCategoryMapping.account_id == acct_id,
+                models.AccountCategoryMapping.budget_category_id == tx.budget_item_id,
+            ).first()
+            if existing:
+                existing.last_used = datetime.now()
+            else:
+                db.add(models.AccountCategoryMapping(
+                    account_id=acct_id,
+                    budget_category_id=tx.budget_item_id,
+                    last_used=datetime.now(),
+                ))
+    db.commit()
 
     return {"updated": updated, "budget_category_id": payload.budget_category_id, "category_name": category.category_name}
 
@@ -2091,6 +2171,7 @@ def get_plan_vs_actual_report(
             "plan1_plan2_diff": float(plan1 - plan2),
             "actual": float(actual),
             "plan2_actual_diff": float(plan2 - actual),
+            "variance": float(plan2 - actual),
             "vat_amount": float(vat),
             "withholding_amount": float(withholding)
         })
@@ -2108,6 +2189,7 @@ def get_plan_vs_actual_report(
             "plan1_plan2_diff": float(total_plan1 - total_plan2),
             "actual": float(total_actual),
             "plan2_actual_diff": float(total_plan2 - total_actual),
+            "variance": float(total_plan2 - total_actual),
             "vat_amount": float(total_vat),
             "withholding_amount": float(total_withholding)
         },

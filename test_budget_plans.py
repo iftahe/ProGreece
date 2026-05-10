@@ -11,16 +11,21 @@ def test_list_budget_items(client, sample_budget_category):
     res = client.get(f"/projects/{pid}/budget-items")
     assert res.status_code == 200
     items = res.json()
-    assert len(items) == 1
-    assert items[0]["category_name"] == "Construction"
-    assert float(items[0]["planned_amount"]) == 100000.0
+    # 4 seeded income categories + 1 manually added "Construction"
+    assert len(items) == 5
+    construction = [i for i in items if i["category_name"] == "Construction"]
+    assert len(construction) == 1
+    assert float(construction[0]["planned_amount"]) == 100000.0
 
 
 def test_list_budget_items_empty(client, sample_project):
     pid = sample_project["id"]
     res = client.get(f"/projects/{pid}/budget-items")
     assert res.status_code == 200
-    assert res.json() == []
+    # New projects get 4 seeded income categories
+    items = res.json()
+    assert len(items) == 4
+    assert all(i["category_type"] == "income" for i in items)
 
 
 # ── Budget Plans ──────────────────────────────────────────────────────
