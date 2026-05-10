@@ -67,7 +67,7 @@ def unmapped_transaction_income(db, project_with_category):
         project_id=project_with_category["project"]["id"],
         date=date(2025, 2, 10),
         amount=5000,
-        description="Customer payment",
+        description="Wire received",
         category="Revenue",
         direction="in",
         type="income",
@@ -292,10 +292,20 @@ class TestBulkAssignAcceptsDirection:
         assert data["budget_category_id"] == category_id
 
     def test_bulk_assign_with_direction_in(self, client, db, project_with_category, unmapped_transaction):
-        category_id = project_with_category["category"].id
+        # Create an income category for this test
+        income_cat = models.BudgetCategory(
+            project_id=project_with_category["project"]["id"],
+            category_name="Customer Payment",
+            planned_amount=0,
+            category_type="income",
+        )
+        db.add(income_cat)
+        db.commit()
+        db.refresh(income_cat)
+
         res = client.put("/admin/bulk-assign-budget", json={
             "transaction_ids": [unmapped_transaction.id],
-            "budget_category_id": category_id,
+            "budget_category_id": income_cat.id,
             "direction": "in",
         })
         assert res.status_code == 200
@@ -306,7 +316,7 @@ class TestBulkAssignAcceptsDirection:
         tx = db.query(models.Transaction).filter(models.Transaction.id == unmapped_transaction.id).first()
         assert tx.direction == "in"
         assert tx.type == "income"
-        assert tx.budget_item_id == category_id
+        assert tx.budget_item_id == income_cat.id
 
     def test_bulk_assign_with_direction_out(self, client, db, project_with_category, unmapped_transaction_income):
         category_id = project_with_category["category"].id
@@ -392,6 +402,16 @@ class TestBulkAssignSetsStatusExecuted:
 
     def test_bulk_assign_overwrites_existing_status(self, client, db, project_with_category):
         """Even if status was something else, bulk-assign should set it to 'executed'."""
+        income_cat = models.BudgetCategory(
+            project_id=project_with_category["project"]["id"],
+            category_name="Income Cat",
+            planned_amount=0,
+            category_type="income",
+        )
+        db.add(income_cat)
+        db.commit()
+        db.refresh(income_cat)
+
         tx = models.Transaction(
             project_id=project_with_category["project"]["id"],
             date=date(2025, 1, 25),
@@ -404,10 +424,9 @@ class TestBulkAssignSetsStatusExecuted:
         db.commit()
         db.refresh(tx)
 
-        category_id = project_with_category["category"].id
         response = client.put("/admin/bulk-assign-budget", json={
             "transaction_ids": [tx.id],
-            "budget_category_id": category_id,
+            "budget_category_id": income_cat.id,
             "direction": "in",
         })
         assert response.status_code == 200
@@ -415,3 +434,123 @@ class TestBulkAssignSetsStatusExecuted:
         db.expire_all()
         tx = db.query(models.Transaction).filter(models.Transaction.id == tx.id).first()
         assert tx.status == "executed"
+
+
+class TestDirectionGuard:
+    """Bulk assign rejects mismatched direction vs category_type."""
+
+    def test_income_direction_to_expense_category_returns_400(self, client, db, project_with_category):
+        """Assigning direction='in' to an expense category must return 400."""
+        tx = models.Transaction(
+            project_id=project_with_category["project"]["id"],
+            date=date(2025, 3, 1),
+            amount=1000,
+            direction="in",
+            budget_item_id=None,
+        )
+        db.add(tx)
+        db.commit()
+        db.refresh(tx)
+
+        expense_cat_id = project_with_category["category"].id
+        res = client.put("/admin/bulk-assign-budget", json={
+            "transaction_ids": [tx.id],
+            "budget_category_id": expense_cat_id,
+            "direction": "in",
+        })
+        assert res.status_code == 400
+        assert "Cannot assign" in res.json()["detail"]
+
+
+class TestAutoMatcherDirectionFilter:
+    """Auto-matcher does not return an expense category for an 'in' transaction."""
+
+    def test_no_expense_category_for_income_tx(self, client, db, project_with_category):
+        """An income transaction should not match an expense-only category."""
+        tx = models.Transaction(
+            project_id=project_with_category["project"]["id"],
+            date=date(2025, 4, 1),
+            amount=2000,
+            category="Materials",
+            description="Materials refund",
+            direction="in",
+            budget_item_id=None,
+        )
+        db.add(tx)
+        db.commit()
+        db.refresh(tx)
+
+        project_id = project_with_category["project"]["id"]
+        res = client.post(f"/admin/budget-mapper/{project_id}?dry_run=true")
+        assert res.status_code == 200
+        data = res.json()
+
+        matched_item = next(
+            (m for m in data["mappings"] if m["transaction_id"] == tx.id), None
+        )
+        # The "Materials" category is expense-type, so it should NOT match an 'in' tx
+        if matched_item:
+            assert matched_item["mapped_to_name"] != "Materials"
+
+
+class TestLearningLoopMapping:
+    """After bulk_assign_budget, AccountCategoryMapping row exists."""
+
+    def test_mapping_created_after_bulk_assign(self, client, db, project_with_category):
+        """Bulk assign creates an AccountCategoryMapping for (from_account_id, budget_category_id)."""
+        account = models.Account(name="Eurobank", is_system_account=0)
+        db.add(account)
+        db.commit()
+        db.refresh(account)
+
+        tx = models.Transaction(
+            project_id=project_with_category["project"]["id"],
+            date=date(2025, 5, 1),
+            amount=3000,
+            direction="out",
+            budget_item_id=None,
+            from_account_id=account.id,
+        )
+        db.add(tx)
+        db.commit()
+        db.refresh(tx)
+
+        category_id = project_with_category["category"].id
+        res = client.put("/admin/bulk-assign-budget", json={
+            "transaction_ids": [tx.id],
+            "budget_category_id": category_id,
+            "direction": "out",
+        })
+        assert res.status_code == 200
+
+        mapping = db.query(models.AccountCategoryMapping).filter(
+            models.AccountCategoryMapping.account_id == account.id,
+            models.AccountCategoryMapping.budget_category_id == category_id,
+        ).first()
+        assert mapping is not None
+        assert mapping.last_used is not None
+
+
+class TestInlineCreateCategory:
+    """POST /budget-categories/ with category_type='income' works correctly."""
+
+    def test_create_income_category(self, client, sample_project):
+        """Creating an income category returns it and it appears in the list."""
+        pid = sample_project["id"]
+        res = client.post("/budget-categories/", json={
+            "project_id": pid,
+            "category_name": "Rental Income",
+            "category_type": "income",
+            "planned_amount": 0,
+        })
+        assert res.status_code == 200
+        data = res.json()
+        assert data["category_name"] == "Rental Income"
+        assert data["category_type"] == "income"
+
+        # Verify it appears in the budget items list
+        items_res = client.get(f"/projects/{pid}/budget-items")
+        items = items_res.json()
+        income_items = [i for i in items if i["category_type"] == "income"]
+        names = [i["category_name"] for i in income_items]
+        assert "Rental Income" in names

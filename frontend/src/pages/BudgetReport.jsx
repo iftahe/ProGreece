@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { getBudgetReport, getBudgetTimeline, updateBudgetCategory, getTransactions, runBudgetMapper, bulkAssignBudget, getBudgetCategories } from '../api';
+import { getBudgetReport, getBudgetTimeline, updateBudgetCategory, getTransactions, runBudgetMapper, bulkAssignBudget, getBudgetCategories, createBudgetCategory } from '../api';
 import { useProject } from '../contexts/ProjectContext';
 import { PencilIcon, CheckIcon, XIcon, EmptyStateIcon, CalendarPlanIcon, TimelineIcon, TableIcon } from '../components/Icons';
 import BudgetPlanEditor from '../components/BudgetPlanEditor';
@@ -151,6 +151,10 @@ const BudgetMapperPanel = ({ projectId, onMappingApplied }) => {
     const [assignCategoryId, setAssignCategoryId] = useState('');
     const [assigning, setAssigning] = useState(false);
     const [directionOverrides, setDirectionOverrides] = useState({});
+    const [showCreateForm, setShowCreateForm] = useState(false);
+    const [newCatName, setNewCatName] = useState('');
+    const [newCatType, setNewCatType] = useState('expense');
+    const [creatingCat, setCreatingCat] = useState(false);
 
     const handlePreview = async () => {
         setLoading(true);
@@ -204,6 +208,36 @@ const BudgetMapperPanel = ({ projectId, onMappingApplied }) => {
         if (!result?.unmatched) return;
         const allIds = result.unmatched.map(u => u.transaction_id);
         setSelectedIds(prev => prev.size === allIds.length ? new Set() : new Set(allIds));
+    };
+
+    const inferDirection = () => {
+        if (selectedIds.size === 0) return null;
+        const selectedTxs = result?.unmatched?.filter(u => selectedIds.has(u.transaction_id)) || [];
+        const dirs = new Set(selectedTxs.map(t => directionOverrides[t.transaction_id] ?? t.direction ?? 'out'));
+        if (dirs.size === 1) return [...dirs][0];
+        return null;
+    };
+
+    const handleCreateCategory = async () => {
+        if (!newCatName.trim()) return;
+        setCreatingCat(true);
+        setError(null);
+        try {
+            const created = await createBudgetCategory({
+                project_id: projectId,
+                category_name: newCatName.trim(),
+                category_type: newCatType,
+                planned_amount: 0,
+            });
+            setCategories(prev => [...prev, created]);
+            setAssignCategoryId(String(created.id));
+            setShowCreateForm(false);
+            setNewCatName('');
+        } catch (err) {
+            setError(`Failed to create category: ${err.response?.data?.detail || err.message}`);
+        } finally {
+            setCreatingCat(false);
+        }
     };
 
     const handleBulkAssign = async () => {
@@ -372,10 +406,21 @@ const BudgetMapperPanel = ({ projectId, onMappingApplied }) => {
                                     <h4 className="text-sm font-medium text-amber-700 mb-2">
                                         Unmatched transactions — select and assign a budget category:
                                     </h4>
-                                    <div className="flex items-center gap-2 mb-2">
+                                    <div className="flex items-center gap-2 mb-2 flex-wrap">
                                         <select
                                             value={assignCategoryId}
-                                            onChange={e => setAssignCategoryId(e.target.value)}
+                                            onChange={e => {
+                                                const val = e.target.value;
+                                                if (val === '__create__') {
+                                                    setShowCreateForm(true);
+                                                    setAssignCategoryId('');
+                                                    const dir = inferDirection();
+                                                    setNewCatType(dir === 'in' ? 'income' : 'expense');
+                                                } else {
+                                                    setAssignCategoryId(val);
+                                                    setShowCreateForm(false);
+                                                }
+                                            }}
                                             className="input text-xs py-1.5 max-w-xs"
                                         >
                                             <option value="">Select budget category...</option>
@@ -394,6 +439,7 @@ const BudgetMapperPanel = ({ projectId, onMappingApplied }) => {
                                                 .map(c => (
                                                     <option key={c.id} value={c.id}>{c.category_name}</option>
                                                 ))}
+                                            <option value="__create__">+ Create new category...</option>
                                         </select>
                                         <button
                                             onClick={handleBulkAssign}
@@ -403,6 +449,38 @@ const BudgetMapperPanel = ({ projectId, onMappingApplied }) => {
                                             {assigning ? 'Assigning...' : `Assign Selected (${selectedIds.size})`}
                                         </button>
                                     </div>
+                                    {showCreateForm && (
+                                        <div className="flex items-center gap-2 mb-2 p-2 bg-blue-50 border border-blue-200 rounded-lg">
+                                            <input
+                                                type="text"
+                                                value={newCatName}
+                                                onChange={e => setNewCatName(e.target.value)}
+                                                placeholder="Category name"
+                                                className="input text-xs py-1 flex-1 max-w-[200px]"
+                                            />
+                                            <select
+                                                value={newCatType}
+                                                onChange={e => setNewCatType(e.target.value)}
+                                                className="input text-xs py-1 w-28"
+                                            >
+                                                <option value="expense">Expense</option>
+                                                <option value="income">Income</option>
+                                            </select>
+                                            <button
+                                                onClick={handleCreateCategory}
+                                                disabled={creatingCat || !newCatName.trim()}
+                                                className="btn-primary text-xs py-1"
+                                            >
+                                                {creatingCat ? 'Creating...' : 'Create'}
+                                            </button>
+                                            <button
+                                                onClick={() => { setShowCreateForm(false); setNewCatName(''); }}
+                                                className="btn-secondary text-xs py-1"
+                                            >
+                                                Cancel
+                                            </button>
+                                        </div>
+                                    )}
                                     <div className="max-h-60 overflow-auto border border-amber-200 rounded-lg">
                                         <table className="min-w-full text-xs">
                                             <thead className="bg-amber-50 sticky top-0">
